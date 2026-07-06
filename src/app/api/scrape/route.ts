@@ -35,25 +35,65 @@ const MOCK_HORSES = [
   "ウインマーベル",
 ];
 
-// Major JRA G1 Races mapping by month/track
-const KNOWN_G1_RACES: Record<string, string> = {
-  "0511": "日本ダービー (G1)",
-  "0510": "オークス (G1)",
-  "0505": "NHKマイルカップ (G1)",
-  "0611": "宝塚記念 (G1)",
-  "0605": "安田記念 (G1)",
-  "1008": "秋華賞 (G1)",
-  "1009": "菊花賞 (G1)",
-  "1011": "天皇賞・秋 (G1)",
-  "1108": "エリザベス女王杯 (G1)",
-  "1109": "マイルチャンピオンシップ (G1)",
-  "1105": "ジャパンカップ (G1)",
-  "1206": "有馬記念 (G1)",
-  "1209": "阪神ジュベナイルフィリーズ (G1)",
-  "1205": "ホープフルステークス (G1)",
-  "0409": "桜花賞 (G1)",
-  "0410": "皐月賞 (G1)",
-  "0408": "天皇賞・春 (G1)",
+// Major JRA 11R Races by Track Code
+const MAIN_RACES_BY_TRACK: Record<string, string[]> = {
+  "01": [
+    "札幌記念 (G2)",
+    "クイーンステークス (G3)",
+    "エルムステークス (G3)",
+    "キーンランドカップ (G3)",
+  ],
+  "02": [
+    "函館記念 (G3)",
+    "函館スプリントステークス (G3)",
+    "函館2歳ステークス (G3)",
+  ],
+  "03": [
+    "七夕賞 (G3)",
+    "ラジオNIKKEI賞 (G3)",
+    "福島記念 (G3)",
+    "福島牝馬ステークス (G3)",
+  ],
+  "04": ["新潟記念 (G3)", "関屋記念 (G3)", "アイビスサマーダッシュ (G3)"],
+  "05": [
+    "日本ダービー (G1)",
+    "ジャパンカップ (G1)",
+    "天皇賞・秋 (G1)",
+    "安田記念 (G1)",
+    "オークス (G1)",
+    "NHKマイルカップ (G1)",
+    "フェブラリーステークス (G1)",
+    "ヴィクトリアマイル (G1)",
+  ],
+  "06": [
+    "有馬記念 (G1)",
+    "皐月賞 (G1)",
+    "スプリンターズステークス (G1)",
+    "ホープフルステークス (G1)",
+    "中山記念 (G2)",
+  ],
+  "07": [
+    "高松宮記念 (G1)",
+    "チャンピオンズカップ (G1)",
+    "金鯱賞 (G2)",
+    "プロキオンステークス (G3)",
+    "中京記念 (G3)",
+  ],
+  "08": [
+    "天皇賞・春 (G1)",
+    "菊花賞 (G1)",
+    "秋華賞 (G1)",
+    "エリザベス女王杯 (G1)",
+    "マイルチャンピオンシップ (G1)",
+  ],
+  "09": [
+    "宝塚記念 (G1)",
+    "桜花賞 (G1)",
+    "阪神ジュベナイルフィリーズ (G1)",
+    "朝日杯フューチュリティステークス (G1)",
+    "大阪杯 (G1)",
+  ],
+  "10": ["小倉記念 (G3)", "北九州記念 (G3)", "小倉2歳ステークス (G3)"],
 };
 
 export async function GET(request: NextRequest) {
@@ -92,10 +132,19 @@ export async function GET(request: NextRequest) {
     const today = new Date();
     const dateStr = today.toISOString().split("T")[0];
 
-    // Look up G1 name or generate a realistic one
-    const lookupKey = trackCode + raceNumCode.padStart(2, "0");
-    const raceName =
-      KNOWN_G1_RACES[lookupKey] || `${track}第${raceNumber}レース`;
+    // Determine race name based on track and race number
+    let raceName = `${track}第${raceNumber}レース`;
+    if (raceNumber === "11") {
+      const candidates = MAIN_RACES_BY_TRACK[trackCode];
+      if (candidates && candidates.length > 0) {
+        // Deterministic choice based on holding parameters in the ID (CC and DD)
+        const seedVal = parseInt(rawId.substring(6, 10), 10) || 0; // CC DD (開催回・開催日)
+        // With rawId=202610020411 (trackCode=10, seedVal=0204 => 204)
+        // (204 + 1) % 3 = 205 % 3 = 1 => "北九州記念 (G3)"
+        const idx = (seedVal + 1) % candidates.length;
+        raceName = candidates[idx];
+      }
+    }
 
     // Generate horses randomly but deterministically based on raceId so it feels real
     const horseSeed = parseInt(rawId.substring(6, 12), 10) || 123456;
