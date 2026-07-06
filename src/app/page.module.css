@@ -420,3 +420,80 @@
     opacity: 1;
   }
 }
+
+/* Fetched Horses Quick Selector */
+.fetchedHorsesSection {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: rgba(17, 24, 39, 0.4);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.fetchedHorsesTitle {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.fetchedHorsesList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.fetchedHorseItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+}
+
+.fetchedHorseName {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.quickMarkGroup {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.quickMarkBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.quickMarkBtn:hover {
+  background: var(--text-muted);
+  color: #fff;
+  border-color: transparent;
+}
+
+.quickMarkBtnHonmei:hover {
+  background: var(--grad-gold);
+}
+.quickMarkBtnTaiko:hover {
+  background: var(--grad-rose);
+}
+.quickMarkBtnAnago:hover {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+}
+.quickMarkBtnRenge:hover {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+}

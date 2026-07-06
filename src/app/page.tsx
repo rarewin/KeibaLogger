@@ -49,6 +49,7 @@ export default function Home() {
   const [activeMemoId, setActiveMemoId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isFetching, setIsFetching] = useState(false);
+  const [fetchedHorses, setFetchedHorses] = useState<string[]>([]);
 
   // Form states
   const [date, setDate] = useState("");
@@ -138,10 +139,13 @@ export default function Home() {
       setTrack(data.track || "東京");
       setRaceNumber(data.raceNumber || "11");
       setRaceName(data.raceName || "");
-      setHonmei(data.horses?.[0] || "");
-      setTaiko(data.horses?.[1] || "");
-      setAnago(data.horses?.[2] || "");
-      setRenge(data.horses?.[3] || "");
+
+      // Clear previous predictions but set up the horse list for quick picking
+      setHonmei("");
+      setTaiko("");
+      setAnago("");
+      setRenge("");
+      setFetchedHorses(data.horses || []);
 
       showToast(`「${data.raceName}」のレース情報を取得しました！`);
       setUrlInput("");
@@ -152,14 +156,50 @@ export default function Home() {
         setTrack("中山");
         setRaceNumber("11");
         setRaceName("有馬記念 (G1)");
-        setHonmei("イクイノックス");
-        setTaiko("リバティアイランド");
-        setAnago("ドウデュース");
-        setRenge("タイトルホルダー");
+
+        setHonmei("");
+        setTaiko("");
+        setAnago("");
+        setRenge("");
+        setFetchedHorses([
+          "イクイノックス",
+          "リバティアイランド",
+          "ドウデュース",
+          "タイトルホルダー",
+        ]);
         showToast("有馬記念のモックデータを取得しました！(デモモード)");
       }, 1500);
     } finally {
       setTimeout(() => setIsFetching(false), 1500);
+    }
+  };
+
+  // Assign horse name to specific prediction input (Allow appending multiple for ▲ and △)
+  const handleQuickMark = (
+    horseName: string,
+    markType: "honmei" | "taiko" | "anago" | "renge",
+  ) => {
+    if (markType === "honmei") {
+      setHonmei(horseName);
+      showToast(`${horseName} を ◎ (本命) に設定しました`);
+    } else if (markType === "taiko") {
+      setTaiko(horseName);
+      showToast(`${horseName} を ◯ (対抗) に設定しました`);
+    } else {
+      const currentVal = markType === "anago" ? anago : renge;
+      const setter = markType === "anago" ? setAnago : setRenge;
+      const label = markType === "anago" ? "▲ (単穴)" : "△ (連下)";
+
+      if (!currentVal) {
+        setter(horseName);
+      } else {
+        // Prevent duplicate appending
+        const list = currentVal.split(/[,、]\s*/).map((x) => x.trim());
+        if (!list.includes(horseName)) {
+          setter(`${currentVal}, ${horseName}`);
+        }
+      }
+      showToast(`${horseName} を ${label} に追加しました`);
     }
   };
 
@@ -207,6 +247,7 @@ export default function Home() {
       setInvestment("");
       setPayout("");
       setResult("pending");
+      setFetchedHorses([]);
     } else {
       showToast(res.error || "保存に失敗しました");
     }
@@ -530,9 +571,10 @@ export default function Home() {
                   <div className={styles.markInputWrapper}>
                     <span className="mark-badge mark-anago active">▲</span>
                     <input
+                      id="anago-input"
                       type="text"
                       className="input-control"
-                      placeholder="単穴馬名 / 馬番"
+                      placeholder="単穴馬名 / 馬番 (複数可)"
                       value={anago}
                       onChange={(e) => setAnago(e.target.value)}
                     />
@@ -540,9 +582,10 @@ export default function Home() {
                   <div className={styles.markInputWrapper}>
                     <span className="mark-badge mark-renge active">△</span>
                     <input
+                      id="renge-input"
                       type="text"
                       className="input-control"
-                      placeholder="連下馬名 / 馬番"
+                      placeholder="連下馬名 / 馬番 (複数可)"
                       value={renge}
                       onChange={(e) => setRenge(e.target.value)}
                     />
@@ -550,8 +593,58 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* Fetched Horses List (Quick Pick Selector) */}
+              {fetchedHorses.length > 0 && (
+                <div className={styles.fetchedHorsesSection}>
+                  <div className={styles.fetchedHorsesTitle}>
+                    取得された出走馬（クリックで予想にコピー）
+                  </div>
+                  <div className={styles.fetchedHorsesList}>
+                    {fetchedHorses.map((horse) => (
+                      <div key={horse} className={styles.fetchedHorseItem}>
+                        <span className={styles.fetchedHorseName}>{horse}</span>
+                        <div className={styles.quickMarkGroup}>
+                          <button
+                            type="button"
+                            className={`${styles.quickMarkBtn} ${styles.quickMarkBtnHonmei}`}
+                            title="本命◎に設定"
+                            onClick={() => handleQuickMark(horse, "honmei")}
+                          >
+                            ◎
+                          </button>
+                          <button
+                            type="button"
+                            className={`${styles.quickMarkBtn} ${styles.quickMarkBtnTaiko}`}
+                            title="対抗◯に設定"
+                            onClick={() => handleQuickMark(horse, "taiko")}
+                          >
+                            ◯
+                          </button>
+                          <button
+                            type="button"
+                            className={`${styles.quickMarkBtn} ${styles.quickMarkBtnAnago}`}
+                            title="単穴▲に設定"
+                            onClick={() => handleQuickMark(horse, "anago")}
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            className={`${styles.quickMarkBtn} ${styles.quickMarkBtnRenge}`}
+                            title="連下△に設定"
+                            onClick={() => handleQuickMark(horse, "renge")}
+                          >
+                            △
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Text Memo */}
-              <div className={styles.formGroup}>
+              <div className={styles.formGroup} style={{ marginTop: "1rem" }}>
                 <label htmlFor="memo-textarea">予想根拠・振り返りメモ</label>
                 <textarea
                   id="memo-textarea"
@@ -603,7 +696,7 @@ export default function Home() {
                   >
                     <option value="pending">結果待ち / 未確定</option>
                     <option value="hit">🎯 的中</option>
-                    <option value="miss">💸 不的中</option>
+                    <option value="miss">💸 不釣合い / 不的中</option>
                   </select>
                 </div>
               </div>

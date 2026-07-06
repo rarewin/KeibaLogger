@@ -14,25 +14,37 @@ const TRACKS: Record<string, string> = {
   "10": "小倉",
 };
 
-// Realistic mock horses list to populate prediction references
-const MOCK_HORSES = [
-  "イクイノックス",
+// Modern JRA Sprinters Mock Pool (For 1000m - 1400m races)
+const MOCK_SPRINTERS = [
+  "ナムラクレア",
+  "マッドクール",
+  "トウシンマカオ",
+  "ママコチャ",
+  "ウインマーベル",
+  "ルガル",
+  "ピューロマジック",
+  "サトノレーヴ",
+  "ビッグシーザー",
+  "アサカラキング",
+  "ジャスティンミラノ",
+  "エイシンスポッター",
+  "モズメイメイ",
+];
+
+// Modern JRA Middle/Long Distance Mock Pool (For 1600m+ races)
+const MOCK_MID_LONG = [
   "ドウデュース",
-  "リバティアイランド",
   "ジャスティンパレス",
-  "タスティエーラ",
-  "ソールオリエンス",
   "ベラジオオペラ",
-  "ジャンタルマンタル",
-  "アスコリピチェーノ",
   "ブローザホーン",
+  "ソールオリエンス",
+  "タスティエーラ",
+  "レガレイラ",
   "ローシャムパーク",
   "ステラヴェローチェ",
-  "レガレイラ",
   "プログノーシス",
-  "マッドクール",
-  "ナムラクレア",
-  "ウインマーベル",
+  "ダノンデサイル",
+  "アスコリピチェーノ",
 ];
 
 // Major JRA 11R Races by Track Code
@@ -98,67 +110,177 @@ const MAIN_RACES_BY_TRACK: Record<string, string[]> = {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const targetUrl = searchParams.get("url") || "";
+  const target = searchParams.get("url") || "";
 
-  if (!targetUrl) {
-    return NextResponse.json({ error: "URL is required" }, { status: 400 });
+  if (!target) {
+    return NextResponse.json(
+      { error: "URL or ID is required" },
+      { status: 400 },
+    );
   }
 
-  // Try to parse Race ID from netkeiba URL (e.g. race_id=202609020411)
-  const raceIdMatch = targetUrl.match(/race_id=(\d{12})/);
-  const rawId = raceIdMatch
+  // 1. Determine JRA 12-digit race ID
+  const raceIdMatch = target.match(/race_id=(\d{12})/);
+  const raceId = raceIdMatch
     ? raceIdMatch[1]
-    : targetUrl.match(/^\d{12}$/)
-      ? targetUrl
+    : target.match(/^\d{12}$/)
+      ? target
       : null;
 
-  if (rawId) {
-    // We extracted a JRA 12-digit race ID: YYYY PP CC DD RR
-    // YYYY = Year (4 digits, e.g. 2026)
-    // PP = Place code (2 digits, e.g. 09 = Hanshin)
-    // CC = Times held (2 digits, e.g. 02 = 2nd time)
-    // DD = Day (2 digits, e.g. 04 = 4th day)
-    // RR = Race number (2 digits, e.g. 11 = 11R)
+  // 2. Formulate URL to scrape
+  let fetchUrl = target;
+  if (raceId) {
+    fetchUrl = `https://race.netkeiba.com/race/shutuba.html?race_id=${raceId}`;
+  }
 
-    const year = rawId.substring(0, 4);
-    const trackCode = rawId.substring(4, 6);
-    const raceNumCode = rawId.substring(10, 12);
+  let scrapedData: {
+    success: boolean;
+    source: string;
+    date: string;
+    track: string;
+    raceNumber: string;
+    raceName: string;
+    horses: string[];
+  } | null = null;
+
+  // 3. Try real HTML Scraping (CORS-free on Next.js server side)
+  try {
+    const res = await fetch(fetchUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(6000), // 6 seconds timeout
+    });
+
+    if (res.ok) {
+      const html = await res.text();
+
+      // Scrape Title Tag
+      const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+      const title = titleMatch ? titleMatch[1].trim() : "";
+
+      // Scrape Horse Names from standard netkeiba HTML markup
+      // Pattern 1: class="HorseName" (Standard race page) extracting from title attribute
+      const horseMatches = [
+        ...html.matchAll(
+          /class=["']HorseName["'][^>]*><a[^>]*title=["']([^"']+)["']/g,
+        ),
+      ];
+      let horses = Array.from(new Set(horseMatches.map((m) => m[1].trim())));
+
+      // Pattern 2: Fallback to general database horse profile links extracting from title attribute
+      if (horses.length === 0) {
+        const altMatches = [
+          ...html.matchAll(
+            /href=["'][^"']*db\.netkeiba\.com\/horse\/\d+\/?[^"']*["'][^>]*title=["']([^"']+)["']/g,
+          ),
+        ];
+        horses = Array.from(new Set(altMatches.map((m) => m[1].trim())));
+      }
+
+      // Filter out meta values or table header texts
+      horses = horses.filter(
+        (h) => h && h.length > 1 && !h.includes("<") && h !== "馬名",
+      );
+
+      if (
+        title &&
+        (title.includes("出馬表") ||
+          title.includes("結果") ||
+          title.includes("レース"))
+      ) {
+        // Extract pure race name by removing trailing website info
+        const raceName = title
+          .split("|")[0]
+          .replace("出馬表", "")
+          .replace("結果", "")
+          .trim();
+
+        // Extract track and race number
+        let track = "東京";
+        let raceNumber = "11";
+        const metaMatch = title.match(
+          /(\d{4}年\d{1,2}月\d{1,2}日)\s+(\S+?)(\d{1,2})R/,
+        );
+
+        if (metaMatch) {
+          track = metaMatch[2];
+          raceNumber = metaMatch[3];
+        } else if (raceId) {
+          const trackCode = raceId.substring(4, 6);
+          track = TRACKS[trackCode] || "東京";
+          raceNumber = parseInt(raceId.substring(10, 12), 10).toString();
+        }
+
+        if (horses.length > 0) {
+          scrapedData = {
+            success: true,
+            source: "scraped-netkeiba",
+            date: new Date().toISOString().split("T")[0],
+            track,
+            raceNumber,
+            raceName,
+            horses: horses.slice(0, 18), // return full field (up to 18 horses)
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(
+      "Real-time scraping failed, falling back to smart mock generator:",
+      e,
+    );
+  }
+
+  // 4. If scraping succeeded, return it immediately
+  if (scrapedData) {
+    return NextResponse.json(scrapedData);
+  }
+
+  // 5. Smart Generative Fallback Mock (If offline or blocked)
+  if (raceId) {
+    const trackCode = raceId.substring(4, 6);
+    const raceNumCode = raceId.substring(10, 12);
 
     const track = TRACKS[trackCode] || "東京";
     const raceNumber = parseInt(raceNumCode, 10).toString();
-
-    // Determine a plausible date based on JRA calendar logic
-    // JRA races are typically on weekends
     const today = new Date();
     const dateStr = today.toISOString().split("T")[0];
 
-    // Determine race name based on track and race number
+    // Determine if this is a sprint race (usually <= 1400m)
+    // Kokura 11R (Kitakyushu Kinen, etc.) and Niigata 11R (Ibis Summer Dash, etc.) are heavily sprints.
+    const isSprint =
+      (trackCode === "10" && raceNumber === "11") ||
+      (trackCode === "04" && raceNumber === "11") ||
+      (trackCode === "02" && raceNumber === "11");
+
+    const pool = isSprint ? MOCK_SPRINTERS : MOCK_MID_LONG;
+
+    // Generate deterministic shuffled horse names based on race ID seed
+    const seed = parseInt(raceId.substring(6, 12), 10) || 123456;
+    const shuffledHorses = [...pool].sort((a, b) => {
+      const hashA = (a.charCodeAt(0) * seed) % 100;
+      const hashB = (b.charCodeAt(0) * seed) % 100;
+      return hashA - hashB;
+    });
+
+    const selectedHorses = shuffledHorses.slice(0, 8);
+
+    // Determine race name deterministically from track main races
     let raceName = `${track}第${raceNumber}レース`;
     if (raceNumber === "11") {
       const candidates = MAIN_RACES_BY_TRACK[trackCode];
       if (candidates && candidates.length > 0) {
-        // Deterministic choice based on holding parameters in the ID (CC and DD)
-        const seedVal = parseInt(rawId.substring(6, 10), 10) || 0; // CC DD (開催回・開催日)
-        // With rawId=202610020411 (trackCode=10, seedVal=0204 => 204)
-        // (204 + 1) % 3 = 205 % 3 = 1 => "北九州記念 (G3)"
+        const seedVal = parseInt(raceId.substring(6, 10), 10) || 0; // CC DD
         const idx = (seedVal + 1) % candidates.length;
         raceName = candidates[idx];
       }
     }
 
-    // Generate horses randomly but deterministically based on raceId so it feels real
-    const horseSeed = parseInt(rawId.substring(6, 12), 10) || 123456;
-    const shuffledHorses = [...MOCK_HORSES].sort((a, b) => {
-      const hashA = (a.charCodeAt(0) * horseSeed) % 100;
-      const hashB = (b.charCodeAt(0) * horseSeed) % 100;
-      return hashA - hashB;
-    });
-
-    const selectedHorses = shuffledHorses.slice(0, 4);
-
     return NextResponse.json({
       success: true,
-      source: "id-parser",
+      source: "id-parser-mock",
       date: dateStr,
       track,
       raceNumber,
@@ -167,56 +289,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  // Fallback for general URLs: Parse domain or title
-  try {
-    // If the user inputs a URL, we attempt a quick fetch in the backend (CORS-free)
-    // This allows scraping race details if the website permits simple HTML requests
-    const res = await fetch(targetUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      },
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (res.ok) {
-      const html = await res.text();
-
-      // Basic regex extraction for Netkeiba (very lightweight, does not require heavy libraries)
-      const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
-      const title = titleMatch ? titleMatch[1].trim() : "";
-
-      if (title.includes("出馬表") || title.includes("競馬")) {
-        // E.g., title: "宝塚記念(G1) 出馬表 | 2026年6月28日 阪神11R レース情報 - netkeiba"
-        const cleanTitle = title.split("|")[0].trim();
-        const parts = title.match(
-          /(\d{4}年\d{1,2}月\d{1,2}日)\s+(\S+?)(\d{1,2})R/,
-        );
-
-        let track = "東京";
-        let raceNumber = "11";
-
-        if (parts) {
-          track = parts[2];
-          raceNumber = parts[3];
-        }
-
-        return NextResponse.json({
-          success: true,
-          source: "html-scraper",
-          date: new Date().toISOString().split("T")[0],
-          track,
-          raceNumber,
-          raceName: cleanTitle || "無題のレース",
-          horses: MOCK_HORSES.slice(4, 8),
-        });
-      }
-    }
-  } catch (e) {
-    // Ignore fetch error, proceed to default mock
-  }
-
-  // Final Generic Mock response
+  // Default Mock Response (General fallback)
   return NextResponse.json({
     success: true,
     source: "generic-mock",
