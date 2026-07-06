@@ -1,32 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { getMemos, saveMemo, deleteMemo, type MemoData } from "./actions";
 import styles from "./page.module.css";
 
-// Interface for Horse Racing Memo
-interface Memo {
-  id: string;
-  date: string;
-  track: string;
-  raceNumber: string;
-  raceName: string;
-  prediction: {
-    honmei: string; // ◎
-    taiko: string; // ◯
-    anago: string; // ▲
-    renge: string; // △
-  };
-  memoText: string;
-  ticketType: string;
-  investment: number;
-  payout: number;
-  result: "hit" | "miss" | "pending";
-}
-
-// Initial dummy data to make the UI look rich and functional on first load
-const INITIAL_MEMOS: Memo[] = [
+// Initial dummy data to seed into SQLite when empty
+const INITIAL_MEMOS: Omit<MemoData, "id">[] = [
   {
-    id: "demo-1",
     date: "2026-06-28",
     track: "阪神",
     raceNumber: "11",
@@ -45,7 +25,6 @@ const INITIAL_MEMOS: Memo[] = [
     result: "hit",
   },
   {
-    id: "demo-2",
     date: "2026-05-24",
     track: "東京",
     raceNumber: "11",
@@ -66,7 +45,7 @@ const INITIAL_MEMOS: Memo[] = [
 ];
 
 export default function Home() {
-  const [memos, setMemos] = useState<Memo[]>([]);
+  const [memos, setMemos] = useState<MemoData[]>([]);
   const [activeMemoId, setActiveMemoId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isFetching, setIsFetching] = useState(false);
@@ -87,26 +66,25 @@ export default function Home() {
   const [result, setResult] = useState<"hit" | "miss" | "pending">("pending");
   const [urlInput, setUrlInput] = useState("");
 
+  // Helper to load and sync data from DB
+  const refreshMemos = async () => {
+    const data = await getMemos();
+    if (data.length === 0) {
+      // Seed initial dummy data if DB is empty
+      for (const item of INITIAL_MEMOS) {
+        await saveMemo(item);
+      }
+      const seeded = await getMemos();
+      setMemos(seeded);
+    } else {
+      setMemos(data);
+    }
+  };
+
   // Load memos on mount
   useEffect(() => {
-    const saved = localStorage.getItem("keiba_memos");
-    if (saved) {
-      try {
-        setMemos(JSON.parse(saved));
-      } catch (e) {
-        setMemos(INITIAL_MEMOS);
-      }
-    } else {
-      setMemos(INITIAL_MEMOS);
-      localStorage.setItem("keiba_memos", JSON.stringify(INITIAL_MEMOS));
-    }
+    refreshMemos();
   }, []);
-
-  // Save memos
-  const saveMemosToStorage = (updatedMemos: Memo[]) => {
-    setMemos(updatedMemos);
-    localStorage.setItem("keiba_memos", JSON.stringify(updatedMemos));
-  };
 
   // Toast handler
   const showToast = (message: string) => {
@@ -148,7 +126,6 @@ export default function Home() {
     showToast("レース情報を検索中...");
 
     try {
-      // Calling our Next.js API endpoint (we will create this next)
       const response = await fetch(
         `/api/scrape?url=${encodeURIComponent(urlInput)}`,
       );
@@ -169,7 +146,7 @@ export default function Home() {
       showToast(`「${data.raceName}」のレース情報を取得しました！`);
       setUrlInput("");
     } catch (err) {
-      // Fallback fallback mock if API fails
+      // Fallback mock if API fails
       setTimeout(() => {
         setDate(new Date().toISOString().split("T")[0]);
         setTrack("中山");
@@ -187,7 +164,7 @@ export default function Home() {
   };
 
   // Handle Add Memo
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!raceName) {
       showToast("レース名を入力してください");
@@ -202,8 +179,7 @@ export default function Home() {
       finalResult = payoutNum > investNum ? "hit" : "miss";
     }
 
-    const newMemo: Memo = {
-      id: Date.now().toString(),
+    const memoPayload: Omit<MemoData, "id"> = {
       date: date || new Date().toISOString().split("T")[0],
       track,
       raceNumber,
@@ -216,30 +192,38 @@ export default function Home() {
       result: finalResult,
     };
 
-    const updated = [newMemo, ...memos];
-    saveMemosToStorage(updated);
-    showToast("メモを保存しました");
+    const res = await saveMemo(memoPayload);
+    if (res.success) {
+      await refreshMemos();
+      showToast("メモを保存しました");
 
-    // Reset form fields
-    setRaceName("");
-    setHonmei("");
-    setTaiko("");
-    setAnago("");
-    setRenge("");
-    setMemoText("");
-    setInvestment("");
-    setPayout("");
-    setResult("pending");
+      // Reset form fields
+      setRaceName("");
+      setHonmei("");
+      setTaiko("");
+      setAnago("");
+      setRenge("");
+      setMemoText("");
+      setInvestment("");
+      setPayout("");
+      setResult("pending");
+    } else {
+      showToast(res.error || "保存に失敗しました");
+    }
   };
 
   // Handle Delete Memo
-  const handleDelete = (id: string, e: React.MouseEvent) => {
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm("このメモを削除してもよろしいですか？")) {
-      const updated = memos.filter((item) => item.id !== id);
-      saveMemosToStorage(updated);
-      if (activeMemoId === id) setActiveMemoId(null);
-      showToast("メモを削除しました");
+      const res = await deleteMemo(id);
+      if (res.success) {
+        await refreshMemos();
+        if (activeMemoId === id) setActiveMemoId(null);
+        showToast("メモを削除しました");
+      } else {
+        showToast(res.error || "削除に失敗しました");
+      }
     }
   };
 
@@ -256,7 +240,7 @@ export default function Home() {
             stroke="currentColor"
             strokeWidth="2.5"
           >
-            <polyline points="20 6 9 17 4 12"></polyline>
+            <polyline points="20 6 9 17 4 12" />
           </svg>
           {toastMessage}
         </div>
@@ -279,8 +263,8 @@ export default function Home() {
                 gap: "0.5rem",
               }}
             >
-              <span>📱 PC / スマホ同期対応 (デモ)</span>
-              <span>💾 ブラウザ自動保存</span>
+              <span>🗄️ SQLite データベース接続中</span>
+              <span>💾 リアルタイム保存</span>
             </p>
           </div>
 
@@ -296,8 +280,8 @@ export default function Home() {
                   stroke="var(--color-emerald)"
                   strokeWidth="2.5"
                 >
-                  <line x1="12" y1="1" x2="12" y2="23"></line>
-                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                  <line x1="12" y1="1" x2="12" y2="23" />
+                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
                 </svg>
                 通算収支
               </div>
@@ -325,8 +309,8 @@ export default function Home() {
                   stroke="var(--color-gold)"
                   strokeWidth="2.5"
                 >
-                  <path d="M23 6l-9.5 9.5-5-5L1 18"></path>
-                  <polyline points="17 6 23 6 23 12"></polyline>
+                  <path d="M23 6l-9.5 9.5-5-5L1 18" />
+                  <polyline points="17 6 23 6 23 12" />
                 </svg>
                 回収率
               </div>
@@ -348,9 +332,9 @@ export default function Home() {
                   stroke="var(--color-blue)"
                   strokeWidth="2.5"
                 >
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <circle cx="12" cy="12" r="6"></circle>
-                  <circle cx="12" cy="12" r="2"></circle>
+                  <circle cx="12" cy="12" r="10" />
+                  <circle cx="12" cy="12" r="6" />
+                  <circle cx="12" cy="12" r="2" />
                 </svg>
                 的中率
               </div>
@@ -380,8 +364,8 @@ export default function Home() {
                 stroke="var(--color-emerald)"
                 strokeWidth="2.5"
               >
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z"></path>
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4z" />
               </svg>
               予想・結果を記録する
             </h2>
@@ -436,8 +420,9 @@ export default function Home() {
             <form onSubmit={handleSubmit}>
               <div className="form-row">
                 <div className={styles.formGroup}>
-                  <label>日付</label>
+                  <label htmlFor="date-input">日付</label>
                   <input
+                    id="date-input"
                     type="date"
                     className="input-control"
                     value={date}
@@ -445,8 +430,9 @@ export default function Home() {
                   />
                 </div>
                 <div className={styles.formGroup}>
-                  <label>開催場</label>
+                  <label htmlFor="track-select">開催場</label>
                   <select
+                    id="track-select"
                     className="input-control"
                     value={track}
                     onChange={(e) => setTrack(e.target.value)}
@@ -478,8 +464,9 @@ export default function Home() {
                   className={styles.formGroup}
                   style={{ gridColumn: "span 1" }}
                 >
-                  <label>レース番号</label>
+                  <label htmlFor="race-number-select">レース番号</label>
                   <select
+                    id="race-number-select"
                     className="input-control"
                     value={raceNumber}
                     onChange={(e) => setRaceNumber(e.target.value)}
@@ -497,8 +484,9 @@ export default function Home() {
                   className={styles.formGroup}
                   style={{ gridColumn: "span 1" }}
                 >
-                  <label>レース名</label>
+                  <label htmlFor="race-name-input">レース名</label>
                   <input
+                    id="race-name-input"
                     type="text"
                     className="input-control"
                     placeholder="例: 有馬記念 (G1)"
@@ -564,8 +552,9 @@ export default function Home() {
 
               {/* Text Memo */}
               <div className={styles.formGroup}>
-                <label>予想根拠・振り返りメモ</label>
+                <label htmlFor="memo-textarea">予想根拠・振り返りメモ</label>
                 <textarea
+                  id="memo-textarea"
                   className="input-control"
                   rows={3}
                   placeholder="馬場状態や展開予想、レース後の振り返りをメモ..."
@@ -578,8 +567,9 @@ export default function Home() {
               {/* Financial & Result */}
               <div className="form-row">
                 <div className={styles.formGroup}>
-                  <label>馬券種</label>
+                  <label htmlFor="ticket-type-select">馬券種</label>
                   <select
+                    id="ticket-type-select"
                     className="input-control"
                     value={ticketType}
                     onChange={(e) => setTicketType(e.target.value)}
@@ -602,8 +592,9 @@ export default function Home() {
                   </select>
                 </div>
                 <div className={styles.formGroup}>
-                  <label>的中状況</label>
+                  <label htmlFor="result-select">的中状況</label>
                   <select
+                    id="result-select"
                     className="input-control"
                     value={result}
                     onChange={(e) =>
@@ -619,8 +610,9 @@ export default function Home() {
 
               <div className="form-row">
                 <div className={styles.formGroup}>
-                  <label>投資額 (円)</label>
+                  <label htmlFor="investment-input">投資額 (円)</label>
                   <input
+                    id="investment-input"
                     type="number"
                     className="input-control"
                     placeholder="1000"
@@ -629,8 +621,9 @@ export default function Home() {
                   />
                 </div>
                 <div className={styles.formGroup}>
-                  <label>払戻額 (円)</label>
+                  <label htmlFor="payout-input">払戻額 (円)</label>
                   <input
+                    id="payout-input"
                     type="number"
                     className="input-control"
                     placeholder="0"
@@ -653,9 +646,9 @@ export default function Home() {
                   stroke="currentColor"
                   strokeWidth="2.5"
                 >
-                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
-                  <polyline points="17 21 17 13 7 13 7 21"></polyline>
-                  <polyline points="7 3 7 8 15 8"></polyline>
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                  <polyline points="17 21 17 13 7 13 7 21" />
+                  <polyline points="7 3 7 8 15 8" />
                 </svg>
                 ログを保存する
               </button>
@@ -673,11 +666,11 @@ export default function Home() {
                 stroke="var(--color-gold)"
                 strokeWidth="2.5"
               >
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-                <line x1="16" y1="13" x2="8" y2="13"></line>
-                <line x1="16" y1="17" x2="8" y2="17"></line>
-                <polyline points="10 9 9 9 8 9"></polyline>
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
               </svg>
               ログ履歴 ({memos.length}件)
             </h2>
@@ -692,6 +685,7 @@ export default function Home() {
                 </div>
               ) : (
                 memos.map((memo) => {
+                  if (!memo.id) return null;
                   const diff = memo.payout - memo.investment;
                   const isPending = memo.result === "pending";
                   const isHit = memo.result === "hit";
@@ -701,7 +695,7 @@ export default function Home() {
                       {/* Summary Row */}
                       <div
                         className={styles.memoHeader}
-                        onClick={() => toggleDetail(memo.id)}
+                        onClick={() => toggleDetail(memo.id!)}
                       >
                         <div className={styles.memoInfo}>
                           <div className={styles.raceMeta}>
@@ -722,7 +716,15 @@ export default function Home() {
                           <div
                             className={`
                             ${styles.incomeValue} 
-                            ${isPending ? styles.incomeZero : diff > 0 ? styles.incomePositive : diff < 0 ? styles.incomeNegative : styles.incomeZero}
+                            ${
+                              isPending
+                                ? styles.incomeZero
+                                : diff > 0
+                                  ? styles.incomePositive
+                                  : diff < 0
+                                    ? styles.incomeNegative
+                                    : styles.incomeZero
+                            }
                           `}
                           >
                             {isPending
@@ -826,7 +828,7 @@ export default function Home() {
                             </div>
                             <button
                               className={styles.deleteBtn}
-                              onClick={(e) => handleDelete(memo.id, e)}
+                              onClick={(e) => handleDelete(memo.id!, e)}
                             >
                               削除
                             </button>
