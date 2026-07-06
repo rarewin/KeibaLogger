@@ -22,9 +22,21 @@ model Memo {
   anago      String
   renge      String
   memoText   String
-  ticketType String
-  investment Int
-  payout     Int
   result     String   // "hit" | "miss" | "pending"
+  resultList String?  // Serialized JSON of top 5 finishing results
   createdAt  DateTime @default(now())
+  
+  tickets    Ticket[]
+}
+
+model Ticket {
+  id         String   @id @default(uuid())
+  memoId     String
+  type       String   // "単勝", "複勝", "枠連", "馬連", "馬単", "ワイド", "3連複", "3連単"
+  selection  String   // 買い目 (例: "5", "5-9", "◎-◯" など)
+  investment Int      // 投資額 (円)
+  payout     Int      @default(0) // 払戻額 (円)
+  isHit      Boolean  @default(false)
+  
+  memo       Memo     @relation(fields: [memoId], references: [id], onDelete: Cascade)
 }

@@ -1,10 +1,38 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getMemos, saveMemo, deleteMemo, type MemoData } from "./actions";
+import {
+  getMemos,
+  saveMemo,
+  deleteMemo,
+  type MemoData,
+  type TicketData,
+  type RaceResult,
+} from "./actions";
 import styles from "./page.module.css";
 
-// Initial dummy data to seed into SQLite when empty
+interface ScrapedHorse {
+  waku: number;
+  umaban: number;
+  horseName: string;
+}
+
+// JRA standard bracket color styling map
+const WAKU_COLORS: Record<
+  number,
+  { bg: string; text: string; border: string }
+> = {
+  1: { bg: "#ffffff", text: "#000000", border: "#cccccc" }, // 1枠: 白
+  2: { bg: "#1f2937", text: "#ffffff", border: "transparent" }, // 2枠: 黒
+  3: { bg: "#ef4444", text: "#ffffff", border: "transparent" }, // 3枠: 赤
+  4: { bg: "#3b82f6", text: "#ffffff", border: "transparent" }, // 4枠: 青
+  5: { bg: "#eab308", text: "#000000", border: "transparent" }, // 5枠: 黄
+  6: { bg: "#10b981", text: "#ffffff", border: "transparent" }, // 6枠: 緑
+  7: { bg: "#f97316", text: "#ffffff", border: "transparent" }, // 7枠: 橙
+  8: { bg: "#ec4899", text: "#ffffff", border: "transparent" }, // 8枠: 桃
+};
+
+// Initial dummy data with nested tickets and results
 const INITIAL_MEMOS: Omit<MemoData, "id">[] = [
   {
     date: "2026-06-28",
@@ -12,17 +40,28 @@ const INITIAL_MEMOS: Omit<MemoData, "id">[] = [
     raceNumber: "11",
     raceName: "宝塚記念 (G1)",
     prediction: {
-      honmei: "ドウデュース",
-      taiko: "ジャスティンパレス",
-      anago: "ベラジオオペラ",
-      renge: "ソールオリエンス",
+      honmei: "15 ドウデュース",
+      taiko: "6 ジャスティンパレス",
+      anago: "4 ベラジオオペラ",
+      renge: "3 ソールオリエンス",
     },
     memoText:
       "重馬場想定。内側の傷みが激しいため外差しが決まる展開とみる。本命ドウデュースは武豊騎手の神騎乗に期待。結果はドウデュースが素晴らしい末脚で差し切り勝ち。対抗のジャスティンパレスは惜しくも届かず4着だったが、3連複が的中して快勝！",
-    ticketType: "3連複",
-    investment: 5000,
-    payout: 18500,
     result: "hit",
+    resultList: [
+      { rank: 1, horseNumber: "15", horseName: "ドウデュース" },
+      { rank: 2, horseNumber: "6", horseName: "ジャスティンパレス" },
+      { rank: 3, horseNumber: "4", horseName: "ベラジオオペラ" },
+    ],
+    tickets: [
+      {
+        type: "3連複",
+        selection: "4-6-15",
+        investment: 5000,
+        payout: 18500,
+        isHit: true,
+      },
+    ],
   },
   {
     date: "2026-05-24",
@@ -30,17 +69,28 @@ const INITIAL_MEMOS: Omit<MemoData, "id">[] = [
     raceNumber: "11",
     raceName: "日本ダービー (G1)",
     prediction: {
-      honmei: "ジャスティンミラノ",
-      taiko: "レガレイラ",
-      anago: "シックスペンス",
-      renge: "ダノンデサイル",
+      honmei: "15 ジャスティンミラノ",
+      taiko: "12 レガレイラ",
+      anago: "6 シックスペンス",
+      renge: "2 ダノンデサイル",
     },
     memoText:
       "スローペース濃厚。先行できるジャスティンミラノを軸にする。ダノンデサイルは馬場状態が合えば一発あると思い連下に。結果はダノンデサイルがインを突いて快勝。本命ジャスティンミラノが2着で馬連はハズレ。ダービーの難しさを改めて実感。",
-    ticketType: "馬連",
-    investment: 3000,
-    payout: 0,
     result: "miss",
+    resultList: [
+      { rank: 1, horseNumber: "12", horseName: "ダノンデサイル" },
+      { rank: 2, horseNumber: "15", horseName: "ジャスティンミラノ" },
+      { rank: 3, horseNumber: "13", horseName: "シンエンペラー" },
+    ],
+    tickets: [
+      {
+        type: "馬連",
+        selection: "12-15",
+        investment: 3000,
+        payout: 0,
+        isHit: false,
+      },
+    ],
   },
 ];
 
@@ -49,7 +99,13 @@ export default function Home() {
   const [activeMemoId, setActiveMemoId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isFetching, setIsFetching] = useState(false);
-  const [fetchedHorses, setFetchedHorses] = useState<string[]>([]);
+  const [fetchedHorses, setFetchedHorses] = useState<ScrapedHorse[]>([]);
+
+  // Scraped results data
+  const [scrapedPayouts, setScrapedPayouts] = useState<
+    Record<string, { selection: string; amount: number }[]>
+  >({});
+  const [scrapedResults, setScrapedResults] = useState<RaceResult[]>([]);
 
   // Form states
   const [date, setDate] = useState("");
@@ -61,11 +117,12 @@ export default function Home() {
   const [anago, setAnago] = useState("");
   const [renge, setRenge] = useState("");
   const [memoText, setMemoText] = useState("");
-  const [ticketType, setTicketType] = useState("単勝");
-  const [investment, setInvestment] = useState("");
-  const [payout, setPayout] = useState("");
-  const [result, setResult] = useState<"hit" | "miss" | "pending">("pending");
   const [urlInput, setUrlInput] = useState("");
+
+  // Multiple Tickets Form State (Default investment is now 100 Yen)
+  const [tickets, setTickets] = useState<Omit<TicketData, "id">[]>([
+    { type: "単勝", selection: "", investment: 100, payout: 0, isHit: false },
+  ]);
 
   // Helper to load and sync data from DB
   const refreshMemos = async () => {
@@ -95,9 +152,20 @@ export default function Home() {
     }, 3000);
   };
 
-  // Calculate Statistics
-  const totalInvestment = memos.reduce((sum, item) => sum + item.investment, 0);
-  const totalPayout = memos.reduce((sum, item) => sum + item.payout, 0);
+  // Helper: Calculate actual investment for a single ticket (応援馬券 costs double)
+  const getTicketCost = (t: Omit<TicketData, "id"> | TicketData) => {
+    return t.type === "応援馬券" ? t.investment * 2 : t.investment;
+  };
+
+  // Calculate Aggregated Statistics
+  const totalInvestment = memos.reduce((sum, memo) => {
+    return sum + memo.tickets.reduce((tSum, t) => tSum + getTicketCost(t), 0);
+  }, 0);
+
+  const totalPayout = memos.reduce((sum, memo) => {
+    return sum + memo.tickets.reduce((tSum, t) => tSum + t.payout, 0);
+  }, 0);
+
   const totalIncome = totalPayout - totalInvestment;
   const recoveryRate =
     totalInvestment > 0 ? Math.round((totalPayout / totalInvestment) * 100) : 0;
@@ -116,7 +184,127 @@ export default function Home() {
     setActiveMemoId(activeMemoId === id ? null : id);
   };
 
-  // Handle URL fetch simulation (mock scraper)
+  // Dynamic ticket row actions (Default investment is now 100 Yen)
+  const handleAddTicket = () => {
+    setTickets([
+      ...tickets,
+      { type: "単勝", selection: "", investment: 100, payout: 0, isHit: false },
+    ]);
+  };
+
+  const handleRemoveTicket = (index: number) => {
+    if (tickets.length === 1) return;
+    setTickets(tickets.filter((_, i) => i !== index));
+  };
+
+  const handleTicketChange = (
+    index: number,
+    key: keyof Omit<TicketData, "id">,
+    value: any,
+  ) => {
+    const newTickets = [...tickets];
+    newTickets[index] = {
+      ...newTickets[index],
+      [key]:
+        key === "investment" || key === "payout" ? Number(value) || 0 : value,
+    };
+    setTickets(newTickets);
+  };
+
+  // Auto-calculate payouts based on scraped dividends
+  const handleAutoCalculatePayouts = () => {
+    if (!scrapedPayouts || Object.keys(scrapedPayouts).length === 0) {
+      showToast("払戻金データがありません。レース結果を取得してください。");
+      return;
+    }
+
+    const normalize = (s: string) =>
+      s
+        .split(/[-ー]/)
+        .map((x) => x.trim())
+        .sort((a, b) => Number(a) - Number(b))
+        .join("-");
+
+    const updatedTickets = tickets.map((t) => {
+      // Special logic for 応援馬券 (Combines Tansho and Fukusho of the same horse selection)
+      if (t.type === "応援馬券") {
+        const tanshoPayouts = scrapedPayouts["単勝"];
+        const fukushoPayouts = scrapedPayouts["複勝"];
+
+        let supportPayout = 0;
+        let isSupportHit = false;
+        const targetHorseNum = t.selection.trim();
+
+        // 1. Check Tansho (Win)
+        if (tanshoPayouts) {
+          const matchedTansho = tanshoPayouts.find(
+            (p) => p.selection === targetHorseNum,
+          );
+          if (matchedTansho) {
+            supportPayout += Math.round(
+              t.investment * (matchedTansho.amount / 100),
+            );
+            isSupportHit = true;
+          }
+        }
+
+        // 2. Check Fukusho (Show)
+        if (fukushoPayouts) {
+          const matchedFukusho = fukushoPayouts.find(
+            (p) => p.selection === targetHorseNum,
+          );
+          if (matchedFukusho) {
+            supportPayout += Math.round(
+              t.investment * (matchedFukusho.amount / 100),
+            );
+            isSupportHit = true;
+          }
+        }
+
+        return {
+          ...t,
+          isHit: isSupportHit,
+          payout: supportPayout,
+        };
+      }
+
+      const typePayouts = scrapedPayouts[t.type];
+      if (!typePayouts) return { ...t, isHit: false, payout: 0 };
+
+      // Exact matching is order-sensitive for Exacta/Trifecta/Win/Show
+      const isOrderSensitive =
+        t.type === "馬単" ||
+        t.type === "3連単" ||
+        t.type === "単勝" ||
+        t.type === "複勝";
+
+      const matched = typePayouts.find((p) => {
+        if (isOrderSensitive) {
+          return p.selection === t.selection.trim();
+        }
+        return normalize(p.selection) === normalize(t.selection);
+      });
+
+      if (matched) {
+        const payoutAmt = Math.round(t.investment * (matched.amount / 100));
+        return {
+          ...t,
+          isHit: true,
+          payout: payoutAmt,
+        };
+      }
+      return {
+        ...t,
+        isHit: false,
+        payout: 0,
+      };
+    });
+
+    setTickets(updatedTickets);
+    showToast("払戻金・的中状況を自動計算しました！");
+  };
+
+  // Handle URL fetch (scrapes entries or results + payouts + order of finish)
   const handleFetchRaceInfo = async () => {
     if (!urlInput) {
       showToast("レースURLまたはIDを入力してください");
@@ -134,23 +322,43 @@ export default function Home() {
 
       const data = await response.json();
 
-      // Auto-fill the form with retrieved data
       setDate(data.date || new Date().toISOString().split("T")[0]);
       setTrack(data.track || "東京");
       setRaceNumber(data.raceNumber || "11");
       setRaceName(data.raceName || "");
 
-      // Clear previous predictions but set up the horse list for quick picking
+      // Reset predictions and load horses
       setHonmei("");
       setTaiko("");
       setAnago("");
       setRenge("");
-      setFetchedHorses(data.horses || []);
 
-      showToast(`「${data.raceName}」のレース情報を取得しました！`);
+      // Sort fetched horses by Umaban (in case API didn't sort, we double-check)
+      const sortedHorses = (data.horses || []).sort(
+        (a: ScrapedHorse, b: ScrapedHorse) => a.umaban - b.umaban,
+      );
+      setFetchedHorses(sortedHorses);
+
+      // Load payouts and finishing order
+      if (data.payouts) {
+        setScrapedPayouts(data.payouts);
+      } else {
+        setScrapedPayouts({});
+      }
+
+      if (data.results) {
+        setScrapedResults(data.results);
+        showToast(
+          `「${data.raceName}」の情報、結果、払戻金を自動取得しました！`,
+        );
+      } else {
+        setScrapedResults([]);
+        showToast(`「${data.raceName}」の出走馬情報を取得しました！`);
+      }
+
       setUrlInput("");
     } catch (err) {
-      // Fallback mock if API fails
+      // Fallback mock
       setTimeout(() => {
         setDate(new Date().toISOString().split("T")[0]);
         setTrack("中山");
@@ -162,11 +370,13 @@ export default function Home() {
         setAnago("");
         setRenge("");
         setFetchedHorses([
-          "イクイノックス",
-          "リバティアイランド",
-          "ドウデュース",
-          "タイトルホルダー",
+          { waku: 1, umaban: 1, horseName: "イクイノックス" },
+          { waku: 2, umaban: 2, horseName: "リバティアイランド" },
+          { waku: 3, umaban: 3, horseName: "ドウデュース" },
+          { waku: 4, umaban: 4, horseName: "タイトルホルダー" },
         ]);
+        setScrapedPayouts({});
+        setScrapedResults([]);
         showToast("有馬記念のモックデータを取得しました！(デモモード)");
       }, 1500);
     } finally {
@@ -174,32 +384,32 @@ export default function Home() {
     }
   };
 
-  // Assign horse name to specific prediction input (Allow appending multiple for ▲ and △)
+  // Assign horse name with horse number to specific prediction input
   const handleQuickMark = (
-    horseName: string,
+    horse: ScrapedHorse,
     markType: "honmei" | "taiko" | "anago" | "renge",
   ) => {
+    const formattedVal = `${horse.umaban} ${horse.horseName}`;
     if (markType === "honmei") {
-      setHonmei(horseName);
-      showToast(`${horseName} を ◎ (本命) に設定しました`);
+      setHonmei(formattedVal);
+      showToast(`◎ (本命) に ${formattedVal} を設定しました`);
     } else if (markType === "taiko") {
-      setTaiko(horseName);
-      showToast(`${horseName} を ◯ (対抗) に設定しました`);
+      setTaiko(formattedVal);
+      showToast(`◯ (対抗) に ${formattedVal} を設定しました`);
     } else {
       const currentVal = markType === "anago" ? anago : renge;
       const setter = markType === "anago" ? setAnago : setRenge;
       const label = markType === "anago" ? "▲ (単穴)" : "△ (連下)";
 
       if (!currentVal) {
-        setter(horseName);
+        setter(formattedVal);
       } else {
-        // Prevent duplicate appending
         const list = currentVal.split(/[,、]\s*/).map((x) => x.trim());
-        if (!list.includes(horseName)) {
-          setter(`${currentVal}, ${horseName}`);
+        if (!list.includes(formattedVal)) {
+          setter(`${currentVal}, ${formattedVal}`);
         }
       }
-      showToast(`${horseName} を ${label} に追加しました`);
+      showToast(`${label} に ${formattedVal} を追加しました`);
     }
   };
 
@@ -211,12 +421,18 @@ export default function Home() {
       return;
     }
 
-    const investNum = Number(investment) || 0;
-    const payoutNum = Number(payout) || 0;
+    const totalInvest = tickets.reduce((sum, t) => sum + getTicketCost(t), 0);
+    const totalPay = tickets.reduce((sum, t) => sum + t.payout, 0);
 
-    let finalResult = result;
-    if (result === "pending" && (investNum > 0 || payoutNum > 0)) {
-      finalResult = payoutNum > investNum ? "hit" : "miss";
+    let finalResult: "hit" | "miss" | "pending" = "pending";
+    if (totalInvest > 0) {
+      if (totalPay > totalInvest) {
+        finalResult = "hit";
+      } else if (totalPay === 0) {
+        finalResult = "miss";
+      } else {
+        finalResult = totalPay >= totalInvest ? "hit" : "miss";
+      }
     }
 
     const memoPayload: Omit<MemoData, "id"> = {
@@ -226,16 +442,21 @@ export default function Home() {
       raceName,
       prediction: { honmei, taiko, anago, renge },
       memoText,
-      ticketType,
-      investment: investNum,
-      payout: payoutNum,
       result: finalResult,
+      resultList: scrapedResults,
+      tickets: tickets.map((t) => ({
+        type: t.type,
+        selection: t.selection,
+        investment: t.investment,
+        payout: t.payout,
+        isHit: t.payout > 0,
+      })),
     };
 
     const res = await saveMemo(memoPayload);
     if (res.success) {
       await refreshMemos();
-      showToast("メモを保存しました");
+      showToast("ログを保存しました");
 
       // Reset form fields
       setRaceName("");
@@ -244,10 +465,18 @@ export default function Home() {
       setAnago("");
       setRenge("");
       setMemoText("");
-      setInvestment("");
-      setPayout("");
-      setResult("pending");
+      setTickets([
+        {
+          type: "単勝",
+          selection: "",
+          investment: 100,
+          payout: 0,
+          isHit: false,
+        },
+      ]);
       setFetchedHorses([]);
+      setScrapedPayouts({});
+      setScrapedResults([]);
     } else {
       showToast(res.error || "保存に失敗しました");
     }
@@ -305,7 +534,7 @@ export default function Home() {
               }}
             >
               <span>🗄️ SQLite データベース接続中</span>
-              <span>💾 リアルタイム保存</span>
+              <span>💾 応援馬券（がんばれ馬券）対応</span>
             </p>
           </div>
 
@@ -422,7 +651,7 @@ export default function Home() {
                     marginTop: "0.15rem",
                   }}
                 >
-                  レース情報・出走馬を自動取得して記入の手間を省きます
+                  出走馬やレース後の払戻金、結果着順を自動取得できます
                 </div>
               </div>
               <div
@@ -553,7 +782,7 @@ export default function Home() {
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="本命馬名 / 馬番"
+                      placeholder="本命馬名 / 馬番 (例: 15 ドウデュース)"
                       value={honmei}
                       onChange={(e) => setHonmei(e.target.value)}
                     />
@@ -563,7 +792,7 @@ export default function Home() {
                     <input
                       type="text"
                       className="input-control"
-                      placeholder="対抗馬名 / 馬番"
+                      placeholder="対抗馬名 / 馬番 (例: 6 ジャスティンパレス)"
                       value={taiko}
                       onChange={(e) => setTaiko(e.target.value)}
                     />
@@ -593,55 +822,382 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Fetched Horses List (Quick Pick Selector) */}
+              {/* Fetched Horses List */}
               {fetchedHorses.length > 0 && (
                 <div className={styles.fetchedHorsesSection}>
                   <div className={styles.fetchedHorsesTitle}>
-                    取得された出走馬（クリックで予想にコピー）
+                    取得された出走馬 (馬番順・クリックで印にコピー)
                   </div>
                   <div className={styles.fetchedHorsesList}>
-                    {fetchedHorses.map((horse) => (
-                      <div key={horse} className={styles.fetchedHorseItem}>
-                        <span className={styles.fetchedHorseName}>{horse}</span>
-                        <div className={styles.quickMarkGroup}>
-                          <button
-                            type="button"
-                            className={`${styles.quickMarkBtn} ${styles.quickMarkBtnHonmei}`}
-                            title="本命◎に設定"
-                            onClick={() => handleQuickMark(horse, "honmei")}
+                    {fetchedHorses.map((horse) => {
+                      const wakuStyle = WAKU_COLORS[horse.waku] || {
+                        bg: "var(--bg-tertiary)",
+                        text: "var(--text-primary)",
+                        border: "transparent",
+                      };
+
+                      return (
+                        <div
+                          key={horse.umaban}
+                          className={styles.fetchedHorseItem}
+                        >
+                          <div
+                            style={{ display: "flex", alignItems: "center" }}
                           >
-                            ◎
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.quickMarkBtn} ${styles.quickMarkBtnTaiko}`}
-                            title="対抗◯に設定"
-                            onClick={() => handleQuickMark(horse, "taiko")}
-                          >
-                            ◯
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.quickMarkBtn} ${styles.quickMarkBtnAnago}`}
-                            title="単穴▲に設定"
-                            onClick={() => handleQuickMark(horse, "anago")}
-                          >
-                            ▲
-                          </button>
-                          <button
-                            type="button"
-                            className={`${styles.quickMarkBtn} ${styles.quickMarkBtnRenge}`}
-                            title="連下△に設定"
-                            onClick={() => handleQuickMark(horse, "renge")}
-                          >
-                            △
-                          </button>
+                            {/* Waku Badge */}
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                width: "22px",
+                                height: "22px",
+                                borderRadius: "4px",
+                                fontSize: "0.75rem",
+                                fontWeight: "800",
+                                backgroundColor: wakuStyle.bg,
+                                color: wakuStyle.text,
+                                border:
+                                  wakuStyle.border !== "transparent"
+                                    ? `1px solid ${wakuStyle.border}`
+                                    : "none",
+                                marginRight: "0.4rem",
+                              }}
+                            >
+                              {horse.waku}
+                            </span>
+                            {/* Umaban Badge */}
+                            <span
+                              style={{
+                                fontWeight: "700",
+                                fontSize: "0.85rem",
+                                marginRight: "0.5rem",
+                                color: "var(--color-gold)",
+                                minWidth: "16px",
+                              }}
+                            >
+                              {horse.umaban}
+                            </span>
+                            <span className={styles.fetchedHorseName}>
+                              {horse.horseName}
+                            </span>
+                          </div>
+
+                          <div className={styles.quickMarkGroup}>
+                            <button
+                              type="button"
+                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnHonmei}`}
+                              onClick={() => handleQuickMark(horse, "honmei")}
+                            >
+                              ◎
+                            </button>
+                            <button
+                              type="button"
+                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnTaiko}`}
+                              onClick={() => handleQuickMark(horse, "taiko")}
+                            >
+                              ◯
+                            </button>
+                            <button
+                              type="button"
+                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnAnago}`}
+                              onClick={() => handleQuickMark(horse, "anago")}
+                            >
+                              ▲
+                            </button>
+                            <button
+                              type="button"
+                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnRenge}`}
+                              onClick={() => handleQuickMark(horse, "renge")}
+                            >
+                              △
+                            </button>
+                          </div>
                         </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Scraped Race Results Table */}
+              {scrapedResults.length > 0 && (
+                <div
+                  className={styles.payoutDisplayBox}
+                  style={{
+                    borderColor: "rgba(16, 185, 129, 0.2)",
+                    background: "rgba(16, 185, 129, 0.03)",
+                  }}
+                >
+                  <div
+                    className={styles.payoutDisplayTitle}
+                    style={{ color: "var(--color-emerald)" }}
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                    取得された確定結果 (1〜5着)
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "0.5rem",
+                      flexWrap: "wrap",
+                      fontSize: "0.8rem",
+                    }}
+                  >
+                    {scrapedResults.map((res) => (
+                      <div
+                        key={res.rank}
+                        style={{
+                          background: "var(--bg-tertiary)",
+                          padding: "0.35rem 0.5rem",
+                          borderRadius: "6px",
+                          border: "1px solid var(--border-color)",
+                          display: "flex",
+                          gap: "0.35rem",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontWeight: "800",
+                            color:
+                              res.rank === 1
+                                ? "var(--color-gold)"
+                                : res.rank === 2
+                                  ? "var(--text-secondary)"
+                                  : "var(--text-muted)",
+                          }}
+                        >
+                          {res.rank}着
+                        </span>
+                        <span style={{ fontWeight: "600" }}>
+                          {res.horseNumber}
+                        </span>
+                        <span>{res.horseName}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
+
+              {/* Scraped Dividends Table */}
+              {Object.keys(scrapedPayouts).length > 0 && (
+                <div className={styles.payoutDisplayBox}>
+                  <div className={styles.payoutDisplayTitle}>
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="16" x2="12" y2="12" />
+                      <line x1="12" y1="8" x2="12.01" y2="8" />
+                    </svg>
+                    取得された確定払戻金 (100円あたり)
+                  </div>
+                  <div className={styles.payoutGrid}>
+                    {Object.entries(scrapedPayouts).map(([type, list]) => (
+                      <div key={type} className={styles.payoutItem}>
+                        <div className={styles.payoutType}>{type}</div>
+                        {list.slice(0, 3).map((item, idx) => (
+                          <div key={idx} className={styles.payoutDetail}>
+                            <span>{item.selection}</span>
+                            <span
+                              style={{
+                                color: "var(--color-gold)",
+                                fontWeight: "600",
+                              }}
+                            >
+                              {item.amount.toLocaleString()}円
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Dynamic Tickets List */}
+              <div style={{ marginTop: "1.25rem" }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "0.875rem",
+                    fontWeight: "600",
+                    color: "var(--text-secondary)",
+                    marginBottom: "0.5rem",
+                  }}
+                >
+                  購入馬券
+                </label>
+                <div className={styles.ticketListContainer}>
+                  {tickets.map((ticket, index) => (
+                    <div key={index} className={styles.ticketRow}>
+                      <select
+                        className="input-control"
+                        style={{ padding: "0.45rem" }}
+                        value={ticket.type}
+                        onChange={(e) =>
+                          handleTicketChange(index, "type", e.target.value)
+                        }
+                      >
+                        {[
+                          "単勝",
+                          "複勝",
+                          "応援馬券",
+                          "枠連",
+                          "馬連",
+                          "馬単",
+                          "ワイド",
+                          "3連複",
+                          "3連単",
+                        ].map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+
+                      <input
+                        type="text"
+                        className="input-control"
+                        style={{ padding: "0.45rem" }}
+                        placeholder="買い目 (例: 5, 6-15)"
+                        value={ticket.selection}
+                        onChange={(e) =>
+                          handleTicketChange(index, "selection", e.target.value)
+                        }
+                        required
+                      />
+
+                      <div
+                        style={{
+                          position: "relative",
+                          display: "flex",
+                          alignItems: "center",
+                        }}
+                      >
+                        <input
+                          type="number"
+                          className="input-control"
+                          style={{ padding: "0.45rem", width: "100%" }}
+                          placeholder="投資額"
+                          value={ticket.investment || ""}
+                          onChange={(e) =>
+                            handleTicketChange(
+                              index,
+                              "investment",
+                              e.target.value,
+                            )
+                          }
+                          required
+                        />
+                        {ticket.type === "応援馬券" && (
+                          <span
+                            style={{
+                              position: "absolute",
+                              right: "5px",
+                              background: "rgba(239, 68, 68, 0.2)",
+                              color: "var(--color-rose)",
+                              fontSize: "0.6rem",
+                              padding: "0.1rem 0.25rem",
+                              borderRadius: "4px",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            ×2
+                          </span>
+                        )}
+                      </div>
+
+                      <input
+                        type="number"
+                        className="input-control"
+                        style={{ padding: "0.45rem" }}
+                        placeholder="払戻額"
+                        value={ticket.payout || ""}
+                        onChange={(e) =>
+                          handleTicketChange(index, "payout", e.target.value)
+                        }
+                      />
+
+                      <button
+                        type="button"
+                        className={styles.removeTicketBtn}
+                        onClick={() => handleRemoveTicket(index)}
+                        disabled={tickets.length === 1}
+                        title="この馬券を削除"
+                      >
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+
+                  <div className={styles.ticketBtnGroup}>
+                    <button
+                      type="button"
+                      className={`${styles.btn} ${styles.addTicketBtn}`}
+                      onClick={handleAddTicket}
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                      >
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                      馬券を追加
+                    </button>
+
+                    {Object.keys(scrapedPayouts).length > 0 && (
+                      <button
+                        type="button"
+                        className={`${styles.btn} ${styles.autoCalcBtn}`}
+                        onClick={handleAutoCalculatePayouts}
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                        >
+                          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                          <polyline points="22 4 12 14.01 9 11.01" />
+                        </svg>
+                        払戻金を自動計算
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
 
               {/* Text Memo */}
               <div className={styles.formGroup} style={{ marginTop: "1rem" }}>
@@ -655,75 +1211,6 @@ export default function Home() {
                   onChange={(e) => setMemoText(e.target.value)}
                   style={{ resize: "vertical" }}
                 />
-              </div>
-
-              {/* Financial & Result */}
-              <div className="form-row">
-                <div className={styles.formGroup}>
-                  <label htmlFor="ticket-type-select">馬券種</label>
-                  <select
-                    id="ticket-type-select"
-                    className="input-control"
-                    value={ticketType}
-                    onChange={(e) => setTicketType(e.target.value)}
-                  >
-                    {[
-                      "単勝",
-                      "複勝",
-                      "枠連",
-                      "馬連",
-                      "馬単",
-                      "ワイド",
-                      "3連複",
-                      "3連単",
-                      "見送り",
-                    ].map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className={styles.formGroup}>
-                  <label htmlFor="result-select">的中状況</label>
-                  <select
-                    id="result-select"
-                    className="input-control"
-                    value={result}
-                    onChange={(e) =>
-                      setResult(e.target.value as "hit" | "miss" | "pending")
-                    }
-                  >
-                    <option value="pending">結果待ち / 未確定</option>
-                    <option value="hit">🎯 的中</option>
-                    <option value="miss">💸 不釣合い / 不的中</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="form-row">
-                <div className={styles.formGroup}>
-                  <label htmlFor="investment-input">投資額 (円)</label>
-                  <input
-                    id="investment-input"
-                    type="number"
-                    className="input-control"
-                    placeholder="1000"
-                    value={investment}
-                    onChange={(e) => setInvestment(e.target.value)}
-                  />
-                </div>
-                <div className={styles.formGroup}>
-                  <label htmlFor="payout-input">払戻額 (円)</label>
-                  <input
-                    id="payout-input"
-                    type="number"
-                    className="input-control"
-                    placeholder="0"
-                    value={payout}
-                    onChange={(e) => setPayout(e.target.value)}
-                  />
-                </div>
               </div>
 
               <button
@@ -779,7 +1266,18 @@ export default function Home() {
               ) : (
                 memos.map((memo) => {
                   if (!memo.id) return null;
-                  const diff = memo.payout - memo.investment;
+
+                  // Aggregate totals for this memo (accounting for Support wagers)
+                  const totalInvest = memo.tickets.reduce(
+                    (sum, t) => sum + getTicketCost(t),
+                    0,
+                  );
+                  const totalPay = memo.tickets.reduce(
+                    (sum, t) => sum + t.payout,
+                    0,
+                  );
+                  const diff = totalPay - totalInvest;
+
                   const isPending = memo.result === "pending";
                   const isHit = memo.result === "hit";
 
@@ -825,7 +1323,9 @@ export default function Home() {
                               : `${diff >= 0 ? "+" : ""}${diff.toLocaleString()}円`}
                           </div>
                           <span className={styles.ticketTypeBadge}>
-                            {memo.ticketType}
+                            {memo.tickets.length > 0
+                              ? `${memo.tickets[0].type}他 ${memo.tickets.length}件`
+                              : "馬券なし"}
                           </span>
                         </div>
                       </div>
@@ -897,6 +1397,143 @@ export default function Home() {
                             </div>
                           </div>
 
+                          {/* Saved Race Results (Finishing positions) */}
+                          {memo.resultList && memo.resultList.length > 0 && (
+                            <div>
+                              <div
+                                style={{
+                                  fontSize: "0.8rem",
+                                  fontWeight: "600",
+                                  color: "var(--text-secondary)",
+                                  marginBottom: "0.35rem",
+                                }}
+                              >
+                                確定結果 (着順)
+                              </div>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: "0.4rem",
+                                  flexWrap: "wrap",
+                                  fontSize: "0.75rem",
+                                  marginBottom: "0.5rem",
+                                }}
+                              >
+                                {memo.resultList.map((res) => (
+                                  <div
+                                    key={res.rank}
+                                    style={{
+                                      background: "rgba(255, 255, 255, 0.02)",
+                                      padding: "0.25rem 0.5rem",
+                                      borderRadius: "6px",
+                                      border: "1px solid var(--border-color)",
+                                      display: "flex",
+                                      gap: "0.35rem",
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        fontWeight: "800",
+                                        color:
+                                          res.rank === 1
+                                            ? "var(--color-gold)"
+                                            : res.rank === 2
+                                              ? "var(--text-secondary)"
+                                              : "var(--text-muted)",
+                                      }}
+                                    >
+                                      {res.rank}着
+                                    </span>
+                                    <span style={{ fontWeight: "600" }}>
+                                      {res.horseNumber}
+                                    </span>
+                                    <span>{res.horseName}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Purchased Tickets Detail Table */}
+                          {memo.tickets.length > 0 && (
+                            <div style={{ marginTop: "0.25rem" }}>
+                              <div
+                                style={{
+                                  fontSize: "0.8rem",
+                                  fontWeight: "600",
+                                  color: "var(--text-secondary)",
+                                  marginBottom: "0.25rem",
+                                }}
+                              >
+                                購入した馬券
+                              </div>
+                              <table className={styles.logTicketsTable}>
+                                <thead>
+                                  <tr>
+                                    <th>式別</th>
+                                    <th>買い目</th>
+                                    <th>投資額</th>
+                                    <th>払戻額</th>
+                                    <th>結果</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {memo.tickets.map((t, idx) => {
+                                    const actualCost = getTicketCost(t);
+                                    return (
+                                      <tr key={idx}>
+                                        <td>{t.type}</td>
+                                        <td
+                                          style={{
+                                            fontFamily:
+                                              "var(--font-outfit), sans-serif",
+                                            fontWeight: "600",
+                                          }}
+                                        >
+                                          {t.selection}
+                                        </td>
+                                        <td>
+                                          {actualCost.toLocaleString()}円
+                                          {t.type === "応援馬券" && (
+                                            <span
+                                              style={{
+                                                fontSize: "0.7rem",
+                                                opacity: 0.6,
+                                                marginLeft: "0.2rem",
+                                              }}
+                                            >
+                                              (単{t.investment} / 複
+                                              {t.investment})
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td>{t.payout.toLocaleString()}円</td>
+                                        <td
+                                          style={{
+                                            fontWeight: "bold",
+                                            color:
+                                              t.payout > 0
+                                                ? "var(--color-emerald)"
+                                                : actualCost > 0 &&
+                                                    t.payout === 0
+                                                  ? "var(--color-rose)"
+                                                  : "var(--text-secondary)",
+                                          }}
+                                        >
+                                          {t.payout > 0
+                                            ? "的中 🎯"
+                                            : actualCost > 0 && t.payout === 0
+                                              ? "不終 💸"
+                                              : "返還/未確定"}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
                           {/* Notes */}
                           {memo.memoText && (
                             <div className={styles.memoTextBox}>
@@ -913,11 +1550,9 @@ export default function Home() {
                           <div className={styles.detailFooter}>
                             <div className={styles.detailStats}>
                               <span>
-                                投資: {memo.investment.toLocaleString()}円
+                                総投資: {totalInvest.toLocaleString()}円
                               </span>
-                              <span>
-                                払戻: {memo.payout.toLocaleString()}円
-                              </span>
+                              <span>総払戻: {totalPay.toLocaleString()}円</span>
                             </div>
                             <button
                               className={styles.deleteBtn}
