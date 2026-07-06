@@ -18,7 +18,8 @@ const outfit = Outfit({
 
 export const metadata: Metadata = {
   title: "KeibaLogger | 競馬収支管理＆予想メモ",
-  description: "競馬のレース予想、結果の比較、収支計算をスマートに行える個人用ダッシュボード。PC・スマホ対応。",
+  description:
+    "競馬のレース予想、結果の比較、収支計算をスマートに行える個人用ダッシュボード。PC・スマホ対応。",
 };
 
 export default function RootLayout({
