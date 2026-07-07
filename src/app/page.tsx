@@ -15,6 +15,7 @@ interface ScrapedHorse {
   waku: number;
   umaban: number;
   horseName: string;
+  jockey?: string;
 }
 
 // JRA standard bracket color styling map
@@ -286,6 +287,7 @@ export default function Home() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isFetching, setIsFetching] = useState(false);
   const [fetchedHorses, setFetchedHorses] = useState<ScrapedHorse[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Scraped results data
   const [scrapedPayouts, setScrapedPayouts] = useState<
@@ -588,12 +590,14 @@ export default function Home() {
     }
   };
 
-  // Assign horse name with horse number to specific prediction input
+  // Assign horse name with horse number and jockey to specific prediction input
   const handleQuickMark = (
     horse: ScrapedHorse,
     markType: "honmei" | "taiko" | "anago" | "renge",
   ) => {
-    const formattedVal = `${horse.umaban} ${horse.horseName}`;
+    const formattedVal = horse.jockey
+      ? `${horse.umaban} ${horse.horseName} (${horse.jockey})`
+      : `${horse.umaban} ${horse.horseName}`;
     if (markType === "honmei") {
       setHonmei(formattedVal);
       showToast(`◎ (本命) に ${formattedVal} を設定しました`);
@@ -617,7 +621,65 @@ export default function Home() {
     }
   };
 
-  // Handle Add Memo
+  // Load saved memo into form for editing
+  const handleEdit = (memo: MemoData) => {
+    setEditingId(memo.id || null);
+    setDate(memo.date);
+    setTrack(memo.track);
+    setRaceNumber(memo.raceNumber);
+    setRaceName(memo.raceName);
+    setHonmei(memo.prediction.honmei);
+    setTaiko(memo.prediction.taiko);
+    setAnago(memo.prediction.anago);
+    setRenge(memo.prediction.renge);
+    setMemoText(memo.memoText);
+    setTickets(
+      memo.tickets.map((t) => ({
+        type: t.type,
+        selection: t.selection,
+        investment: t.investment,
+        payout: t.payout,
+        isHit: t.isHit,
+      })),
+    );
+    setScrapedResults(memo.resultList || []);
+
+    if (memo.resultList && memo.resultList.length > 0) {
+      setFetchedHorses(
+        memo.resultList.map((r) => ({
+          waku: 1,
+          umaban: parseInt(r.horseNumber, 10) || 1,
+          horseName: r.horseName,
+          jockey: r.jockey,
+        })),
+      );
+    } else {
+      setFetchedHorses([]);
+    }
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    showToast("記録を編集フォームに読み込みました");
+  };
+
+  // Cancel edit mode
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setRaceName("");
+    setHonmei("");
+    setTaiko("");
+    setAnago("");
+    setRenge("");
+    setMemoText("");
+    setTickets([
+      { type: "単勝", selection: "", investment: 100, payout: 0, isHit: false },
+    ]);
+    setFetchedHorses([]);
+    setScrapedPayouts({});
+    setScrapedResults([]);
+    showToast("編集をキャンセルしました");
+  };
+
+  // Handle Add or Update Memo
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!raceName) {
@@ -639,7 +701,8 @@ export default function Home() {
       }
     }
 
-    const memoPayload: Omit<MemoData, "id"> = {
+    const memoPayload: Omit<MemoData, "id"> & { id?: string } = {
+      ...(editingId ? { id: editingId } : {}),
       date: date || new Date().toISOString().split("T")[0],
       track,
       raceNumber,
@@ -660,9 +723,10 @@ export default function Home() {
     const res = await saveMemo(memoPayload);
     if (res.success) {
       await refreshMemos();
-      showToast("ログを保存しました");
+      showToast(editingId ? "ログを更新しました" : "ログを保存しました");
 
       // Reset form fields
+      setEditingId(null);
       setRaceName("");
       setHonmei("");
       setTaiko("");
@@ -892,6 +956,42 @@ export default function Home() {
 
             {/* Form */}
             <form onSubmit={handleSubmit}>
+              {editingId && (
+                <div
+                  className={styles.editingBanner}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    backgroundColor: "rgba(59, 130, 246, 0.15)",
+                    border: "1px solid var(--color-blue)",
+                    padding: "0.6rem 0.8rem",
+                    borderRadius: "8px",
+                    marginBottom: "1rem",
+                    fontSize: "0.85rem",
+                    color: "var(--color-blue)",
+                    fontWeight: "600",
+                  }}
+                >
+                  <span>📝 過去のログを編集しています</span>
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    style={{
+                      backgroundColor: "var(--color-rose)",
+                      color: "#ffffff",
+                      border: "none",
+                      padding: "0.25rem 0.5rem",
+                      borderRadius: "6px",
+                      fontSize: "0.75rem",
+                      cursor: "pointer",
+                      fontWeight: "normal",
+                    }}
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              )}
               <div className="form-row">
                 <div className={styles.formGroup}>
                   <label htmlFor="date-input">日付</label>
@@ -1084,6 +1184,17 @@ export default function Home() {
                             </span>
                             <span className={styles.fetchedHorseName}>
                               {horse.horseName}
+                              {horse.jockey && (
+                                <span
+                                  style={{
+                                    fontSize: "0.75rem",
+                                    color: "var(--text-secondary)",
+                                    marginLeft: "0.25rem",
+                                  }}
+                                >
+                                  ({horse.jockey})
+                                </span>
+                              )}
                             </span>
                           </div>
 
@@ -1471,7 +1582,7 @@ export default function Home() {
                   <polyline points="17 21 17 13 7 13 7 21" />
                   <polyline points="7 3 7 8 15 8" />
                 </svg>
-                ログを保存する
+                {editingId ? "変更を保存する" : "ログを保存する"}
               </button>
             </form>
           </div>
@@ -1688,7 +1799,20 @@ export default function Home() {
                                     <span style={{ fontWeight: "600" }}>
                                       {res.horseNumber}
                                     </span>
-                                    <span>{res.horseName}</span>
+                                    <span>
+                                      {res.horseName}
+                                      {res.jockey && (
+                                        <span
+                                          style={{
+                                            fontSize: "0.75rem",
+                                            color: "var(--text-secondary)",
+                                            marginLeft: "0.25rem",
+                                          }}
+                                        >
+                                          ({res.jockey})
+                                        </span>
+                                      )}
+                                    </span>
                                   </div>
                                 ))}
                               </div>
@@ -1812,12 +1936,33 @@ export default function Home() {
                               </span>
                               <span>総払戻: {totalPay.toLocaleString()}円</span>
                             </div>
-                            <button
-                              className={styles.deleteBtn}
-                              onClick={(e) => handleDelete(memo.id!, e)}
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "0.5rem",
+                              }}
                             >
-                              削除
-                            </button>
+                              <button
+                                type="button"
+                                className={styles.deleteBtn}
+                                style={{
+                                  backgroundColor: "rgba(59, 130, 246, 0.15)",
+                                  color: "var(--color-blue)",
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEdit(memo);
+                                }}
+                              >
+                                編集
+                              </button>
+                              <button
+                                className={styles.deleteBtn}
+                                onClick={(e) => handleDelete(memo.id!, e)}
+                              >
+                                削除
+                              </button>
+                            </div>
                           </div>
                         </div>
                       )}

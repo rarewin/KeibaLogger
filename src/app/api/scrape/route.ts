@@ -112,9 +112,10 @@ interface HorseDetail {
   waku: number;
   umaban: number;
   horseName: string;
+  jockey?: string;
 }
 
-// Helper: Scrape horse names with Waku and Umaban details
+// Helper: Scrape horse names with Waku, Umaban and Jockey details
 function extractHorsesWithDetails(html: string): HorseDetail[] {
   const list: HorseDetail[] = [];
   const trMatches = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)];
@@ -130,12 +131,24 @@ function extractHorsesWithDetails(html: string): HorseDetail[] {
     const horseMatch = row.match(
       /class=["']HorseName["'][^>]*><a[^>]*title=["']([^"']+)["']/i,
     );
+    const jockeyMatch =
+      row.match(/class=["']Jockey["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i) ||
+      row.match(/class=["']Jockey["'][^>]*>([\s\S]*?)<\/td>/i);
+
+    let jockey = "";
+    if (jockeyMatch) {
+      jockey = jockeyMatch[1]
+        .replace(/<[^>]+>/g, "")
+        .trim()
+        .replace(/\s+/g, " ");
+    }
 
     if (wakuMatch && umabanMatch && horseMatch) {
       list.push({
         waku: parseInt(wakuMatch[1], 10),
         umaban: parseInt(umabanMatch[1], 10),
         horseName: horseMatch[1].trim(),
+        jockey: jockey || undefined,
       });
       continue;
     }
@@ -148,12 +161,24 @@ function extractHorsesWithDetails(html: string): HorseDetail[] {
     const horseResultMatch = row.match(
       /class=["']Horse_Name["'][\s\S]*?title=["']([^"']+)["']/i,
     );
+    const jockeyResultMatch =
+      row.match(/class=["']Jockey["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i) ||
+      row.match(/class=["']Jockey["'][^>]*>([\s\S]*?)<\/td>/i);
+
+    let resultJockey = "";
+    if (jockeyResultMatch) {
+      resultJockey = jockeyResultMatch[1]
+        .replace(/<[^>]+>/g, "")
+        .trim()
+        .replace(/\s+/g, " ");
+    }
 
     if (wakuResultMatch && numResultMatch && horseResultMatch) {
       list.push({
         waku: parseInt(wakuResultMatch[1], 10),
         umaban: parseInt(numResultMatch[1], 10),
         horseName: horseResultMatch[1].trim(),
+        jockey: resultJockey || undefined,
       });
     }
   }
@@ -243,9 +268,13 @@ function extractPayouts(
 // Helper: Scrape finishing order results (Ranks 1 to 5)
 function extractResults(
   html: string,
-): { rank: number; horseNumber: string; horseName: string }[] {
-  const results: { rank: number; horseNumber: string; horseName: string }[] =
-    [];
+): { rank: number; horseNumber: string; horseName: string; jockey?: string }[] {
+  const results: {
+    rank: number;
+    horseNumber: string;
+    horseName: string;
+    jockey?: string;
+  }[] = [];
   const trMatches = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)];
 
   for (const trMatch of trMatches) {
@@ -263,12 +292,25 @@ function extractResults(
         const horseMatch = row.match(
           /class=["']Horse_Name["'][\s\S]*?title=["']([^"']+)["']/i,
         );
+        const jockeyMatch =
+          row.match(
+            /class=["']Jockey["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i,
+          ) || row.match(/class=["']Jockey["'][^>]*>([\s\S]*?)<\/td>/i);
+
+        let jockey = "";
+        if (jockeyMatch) {
+          jockey = jockeyMatch[1]
+            .replace(/<[^>]+>/g, "")
+            .trim()
+            .replace(/\s+/g, " ");
+        }
 
         if (numMatch && horseMatch) {
           results.push({
             rank,
             horseNumber: numMatch[1].trim(),
             horseName: horseMatch[1].trim(),
+            jockey: jockey || undefined,
           });
         }
       }
@@ -420,6 +462,16 @@ export async function GET(request: NextRequest) {
       (trackCode === "02" && raceNumber === "11");
 
     const pool = isSprint ? MOCK_SPRINTERS : MOCK_MID_LONG;
+    const mockJockeys = [
+      "ルメール",
+      "川田将雅",
+      "武豊",
+      "戸崎圭太",
+      "坂井瑠星",
+      "横山武史",
+      "松山弘平",
+      "デムーロ",
+    ];
 
     const seed = parseInt(raceId.substring(6, 12), 10) || 123456;
     const shuffledHorses = [...pool].sort((a, b) => {
@@ -436,6 +488,7 @@ export async function GET(request: NextRequest) {
         waku,
         umaban,
         horseName: name,
+        jockey: mockJockeys[index % mockJockeys.length],
       };
     });
 
@@ -454,16 +507,19 @@ export async function GET(request: NextRequest) {
         rank: 1,
         horseNumber: "1",
         horseName: selectedHorses[0] || "ドウデュース",
+        jockey: mockJockeys[0],
       },
       {
         rank: 2,
         horseNumber: "2",
         horseName: selectedHorses[1] || "イクイノックス",
+        jockey: mockJockeys[1],
       },
       {
         rank: 3,
         horseNumber: "3",
         horseName: selectedHorses[2] || "リバティアイランド",
+        jockey: mockJockeys[2],
       },
     ];
 
@@ -487,10 +543,15 @@ export async function GET(request: NextRequest) {
     raceNumber: "11",
     raceName: "ジェミニステークス",
     horses: [
-      { waku: 1, umaban: 1, horseName: "ドウデュース" },
-      { waku: 2, umaban: 2, horseName: "イクイノックス" },
-      { waku: 3, umaban: 3, horseName: "リバティアイランド" },
-      { waku: 4, umaban: 4, horseName: "プログノーシス" },
+      { waku: 1, umaban: 1, horseName: "ドウデュース", jockey: "武豊" },
+      { waku: 2, umaban: 2, horseName: "イクイノックス", jockey: "ルメール" },
+      {
+        waku: 3,
+        umaban: 3,
+        horseName: "リバティアイランド",
+        jockey: "川田将雅",
+      },
+      { waku: 4, umaban: 4, horseName: "プログノーシス", jockey: "戸崎圭太" },
     ],
   });
 }

@@ -15,6 +15,7 @@ export interface RaceResult {
   rank: number;
   horseNumber: string;
   horseName: string;
+  jockey?: string;
 }
 
 export interface MemoData {
