@@ -32,6 +32,192 @@ const WAKU_COLORS: Record<
   8: { bg: "#ec4899", text: "#ffffff", border: "transparent" }, // 8枠: 桃
 };
 
+// --- Combinations Expansion Helpers ---
+function getCombinations(array: string[], size: number): string[][] {
+  const result: string[][] = [];
+  function p(t: string[], a: string[], n: number) {
+    if (n === 0) {
+      result.push(t);
+      return;
+    }
+    for (let i = 0, l = a.length; i <= l - n; i++) {
+      p(t.concat([a[i]]), a.slice(i + 1), n - 1);
+    }
+  }
+  p([], array, size);
+  return result;
+}
+
+function getPermutations(array: string[], size: number): string[][] {
+  const result: string[][] = [];
+  function p(t: string[], a: string[]) {
+    if (t.length === size) {
+      result.push(t);
+      return;
+    }
+    for (let i = 0, l = a.length; i < l; i++) {
+      const rest = a.slice();
+      rest.splice(i, 1);
+      p(t.concat([a[i]]), rest);
+    }
+  }
+  p([], array);
+  return result;
+}
+
+function parseNumList(str: string): string[] {
+  return str
+    .split(/[,、\s]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+// Expands racing notations (BOX, Nagashi, Formations) into discrete tickets (e.g. "3-6", "3-4")
+export function expandTicketSelection(
+  type: string,
+  selection: string,
+): string[] {
+  const clean = selection.trim().toUpperCase();
+  if (!clean) return [];
+
+  const targetSizeMap: Record<string, number> = {
+    単勝: 1,
+    複勝: 1,
+    応援馬券: 1,
+    枠連: 2,
+    馬連: 2,
+    馬単: 2,
+    ワイド: 2,
+    "3連複": 3,
+    "3連単": 3,
+  };
+  const size = targetSizeMap[type] || 1;
+  const isOrderSensitive = type === "馬単" || type === "3連単";
+
+  // 1. BOX Notation (e.g., "BOX 3,5,6" or "3,5,6 BOX")
+  const isBox = clean.includes("BOX") || clean.includes("ボックス");
+  if (isBox) {
+    const rawNums = clean.replace(/BOX|ボックス/gi, "");
+    const nums = parseNumList(rawNums);
+    if (nums.length < size) return [];
+
+    if (isOrderSensitive) {
+      return getPermutations(nums, size).map((arr) => arr.join("-"));
+    }
+    return getCombinations(nums, size).map((arr) =>
+      arr.sort((a, b) => Number(a) - Number(b)).join("-"),
+    );
+  }
+
+  // 2. Nagashi (流し) & Formation (フォーメーション)
+  // Splits sections by "-", "=>", "→", "⇒" or "★"
+  const sections = clean.split(/[-ー=➔→⇒★]+/g).map((s) => parseNumList(s));
+
+  if (sections.length > 1) {
+    // 2.1 Formation (e.g., "1,2 - 3,4 - 5,6")
+    if (sections.length === size) {
+      const results: string[] = [];
+
+      function helper(currentIndex: number, currentCombination: string[]) {
+        if (currentIndex === size) {
+          if (new Set(currentCombination).size === size) {
+            if (isOrderSensitive) {
+              results.push(currentCombination.join("-"));
+            } else {
+              results.push(
+                [...currentCombination]
+                  .sort((a, b) => Number(a) - Number(b))
+                  .join("-"),
+              );
+            }
+          }
+          return;
+        }
+        for (const num of sections[currentIndex]) {
+          helper(currentIndex + 1, currentCombination.concat([num]));
+        }
+      }
+
+      helper(0, []);
+      return Array.from(new Set(results));
+    }
+
+    // 2.2 Nagashi (流し) (e.g., "1 - 2,3,4")
+    if (sections.length === 2) {
+      const axis = sections[0];
+      const opponents = sections[1];
+      const axisCount = axis.length;
+
+      // 2-Horse wagers (Quinella/Exacta/Wide) -> axis must be 1 horse
+      if (size === 2 && axisCount === 1) {
+        const results: string[] = [];
+        const singleAxis = axis[0];
+        for (const opp of opponents) {
+          if (singleAxis === opp) continue;
+          if (isOrderSensitive) {
+            results.push(`${singleAxis}-${opp}`);
+          } else {
+            results.push(
+              [singleAxis, opp].sort((a, b) => Number(a) - Number(b)).join("-"),
+            );
+          }
+        }
+        return results;
+      }
+
+      // 3-Horse wagers (Trio/Trifecta) -> axis can be 1 or 2 horses
+      if (size === 3) {
+        const results: string[] = [];
+        if (axisCount === 1) {
+          // 1-Horse Axis (needs 2 from opponents)
+          const singleAxis = axis[0];
+          const oppCombos = getCombinations(opponents, 2);
+          for (const combo of oppCombos) {
+            if (combo.includes(singleAxis)) continue;
+            if (isOrderSensitive) {
+              results.push(`${singleAxis}-${combo[0]}-${combo[1]}`);
+              results.push(`${singleAxis}-${combo[1]}-${combo[0]}`);
+            } else {
+              results.push(
+                [singleAxis, ...combo]
+                  .sort((a, b) => Number(a) - Number(b))
+                  .join("-"),
+              );
+            }
+          }
+        } else if (axisCount === 2) {
+          // 2-Horse Axis (needs 1 from opponents)
+          const axis1 = axis[0];
+          const axis2 = axis[1];
+          for (const opp of opponents) {
+            if (opp === axis1 || opp === axis2) continue;
+            if (isOrderSensitive) {
+              results.push(`${axis1}-${axis2}-${opp}`);
+            } else {
+              results.push(
+                [axis1, axis2, opp]
+                  .sort((a, b) => Number(a) - Number(b))
+                  .join("-"),
+              );
+            }
+          }
+        }
+        return results;
+      }
+    }
+  }
+
+  // 3. Plain single bet (e.g. "15" or "6-15")
+  if (isOrderSensitive) {
+    return [clean];
+  }
+  const sorted = clean
+    .split(/[-ー]+/g)
+    .sort((a, b) => Number(a) - Number(b))
+    .join("-");
+  return [sorted];
+}
+
 // Initial dummy data with nested tickets and results
 const INITIAL_MEMOS: Omit<MemoData, "id">[] = [
   {
@@ -119,7 +305,7 @@ export default function Home() {
   const [memoText, setMemoText] = useState("");
   const [urlInput, setUrlInput] = useState("");
 
-  // Multiple Tickets Form State (Default investment is now 100 Yen)
+  // Multiple Tickets Form State (Default unit investment is now 100 Yen)
   const [tickets, setTickets] = useState<Omit<TicketData, "id">[]>([
     { type: "単勝", selection: "", investment: 100, payout: 0, isHit: false },
   ]);
@@ -127,16 +313,7 @@ export default function Home() {
   // Helper to load and sync data from DB
   const refreshMemos = async () => {
     const data = await getMemos();
-    if (data.length === 0) {
-      // Seed initial dummy data if DB is empty
-      for (const item of INITIAL_MEMOS) {
-        await saveMemo(item);
-      }
-      const seeded = await getMemos();
-      setMemos(seeded);
-    } else {
-      setMemos(data);
-    }
+    setMemos(data);
   };
 
   // Load memos on mount
@@ -197,21 +374,42 @@ export default function Home() {
     setTickets(tickets.filter((_, i) => i !== index));
   };
 
+  // Triggers updates for selections and auto-fills investment if combos are matched
   const handleTicketChange = (
     index: number,
     key: keyof Omit<TicketData, "id">,
     value: any,
   ) => {
     const newTickets = [...tickets];
-    newTickets[index] = {
-      ...newTickets[index],
-      [key]:
-        key === "investment" || key === "payout" ? Number(value) || 0 : value,
-    };
+
+    if (key === "selection") {
+      newTickets[index].selection = value;
+      // Auto-compute combinations count and fill total investment
+      const combos = expandTicketSelection(newTickets[index].type, value);
+      if (combos.length > 0) {
+        const factor = newTickets[index].type === "応援馬券" ? 2 : 1;
+        newTickets[index].investment = 100 * combos.length * factor;
+      }
+    } else if (key === "type") {
+      newTickets[index].type = value;
+      // Re-compute combos count on type change
+      const combos = expandTicketSelection(value, newTickets[index].selection);
+      if (combos.length > 0) {
+        const factor = value === "応援馬券" ? 2 : 1;
+        newTickets[index].investment = 100 * combos.length * factor;
+      }
+    } else {
+      newTickets[index] = {
+        ...newTickets[index],
+        [key]:
+          key === "investment" || key === "payout" ? Number(value) || 0 : value,
+      };
+    }
+
     setTickets(newTickets);
   };
 
-  // Auto-calculate payouts based on scraped dividends
+  // Auto-calculate payouts based on scraped dividends (supports multi-hits for BOX/Formations)
   const handleAutoCalculatePayouts = () => {
     if (!scrapedPayouts || Object.keys(scrapedPayouts).length === 0) {
       showToast("払戻金データがありません。レース結果を取得してください。");
@@ -226,7 +424,7 @@ export default function Home() {
         .join("-");
 
     const updatedTickets = tickets.map((t) => {
-      // Special logic for 応援馬券 (Combines Tansho and Fukusho of the same horse selection)
+      // 1. Check Special 応援馬券 Support Wagers
       if (t.type === "応援馬券") {
         const tanshoPayouts = scrapedPayouts["単勝"];
         const fukushoPayouts = scrapedPayouts["複勝"];
@@ -235,7 +433,6 @@ export default function Home() {
         let isSupportHit = false;
         const targetHorseNum = t.selection.trim();
 
-        // 1. Check Tansho (Win)
         if (tanshoPayouts) {
           const matchedTansho = tanshoPayouts.find(
             (p) => p.selection === targetHorseNum,
@@ -247,8 +444,6 @@ export default function Home() {
             isSupportHit = true;
           }
         }
-
-        // 2. Check Fukusho (Show)
         if (fukushoPayouts) {
           const matchedFukusho = fukushoPayouts.find(
             (p) => p.selection === targetHorseNum,
@@ -268,35 +463,44 @@ export default function Home() {
         };
       }
 
+      // 2. BOX, Nagashi, Formations or Plain Single Bets
+      const combos = expandTicketSelection(t.type, t.selection);
+      if (combos.length === 0) return { ...t, isHit: false, payout: 0 };
+
       const typePayouts = scrapedPayouts[t.type];
       if (!typePayouts) return { ...t, isHit: false, payout: 0 };
 
-      // Exact matching is order-sensitive for Exacta/Trifecta/Win/Show
+      // Calculate investment unit cost per combination
+      const unitInvestment = Math.round(t.investment / combos.length);
       const isOrderSensitive =
         t.type === "馬単" ||
         t.type === "3連単" ||
         t.type === "単勝" ||
         t.type === "複勝";
 
-      const matched = typePayouts.find((p) => {
-        if (isOrderSensitive) {
-          return p.selection === t.selection.trim();
-        }
-        return normalize(p.selection) === normalize(t.selection);
-      });
+      let totalPayoutForTicket = 0;
+      let isHit = false;
 
-      if (matched) {
-        const payoutAmt = Math.round(t.investment * (matched.amount / 100));
-        return {
-          ...t,
-          isHit: true,
-          payout: payoutAmt,
-        };
+      for (const combo of combos) {
+        const matched = typePayouts.find((p) => {
+          if (isOrderSensitive) {
+            return p.selection === combo;
+          }
+          return normalize(p.selection) === normalize(combo);
+        });
+
+        if (matched) {
+          totalPayoutForTicket += Math.round(
+            unitInvestment * (matched.amount / 100),
+          );
+          isHit = true;
+        }
       }
+
       return {
         ...t,
-        isHit: false,
-        payout: 0,
+        isHit,
+        payout: totalPayoutForTicket,
       };
     });
 
@@ -534,7 +738,7 @@ export default function Home() {
               }}
             >
               <span>🗄️ SQLite データベース接続中</span>
-              <span>💾 応援馬券（がんばれ馬券）対応</span>
+              <span>💾 BOX・流し・フォーメーション対応</span>
             </p>
           </div>
 
@@ -1043,117 +1247,154 @@ export default function Home() {
                   購入馬券
                 </label>
                 <div className={styles.ticketListContainer}>
-                  {tickets.map((ticket, index) => (
-                    <div key={index} className={styles.ticketRow}>
-                      <select
-                        className="input-control"
-                        style={{ padding: "0.45rem" }}
-                        value={ticket.type}
-                        onChange={(e) =>
-                          handleTicketChange(index, "type", e.target.value)
-                        }
-                      >
-                        {[
-                          "単勝",
-                          "複勝",
-                          "応援馬券",
-                          "枠連",
-                          "馬連",
-                          "馬単",
-                          "ワイド",
-                          "3連複",
-                          "3連単",
-                        ].map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </select>
+                  {tickets.map((ticket, index) => {
+                    const expanded = expandTicketSelection(
+                      ticket.type,
+                      ticket.selection,
+                    );
+                    const isCombo =
+                      expanded.length > 0 && ticket.selection.trim().length > 0;
 
-                      <input
-                        type="text"
-                        className="input-control"
-                        style={{ padding: "0.45rem" }}
-                        placeholder="買い目 (例: 5, 6-15)"
-                        value={ticket.selection}
-                        onChange={(e) =>
-                          handleTicketChange(index, "selection", e.target.value)
-                        }
-                        required
-                      />
+                    return (
+                      <div key={index} className={styles.ticketRow}>
+                        <select
+                          className="input-control"
+                          style={{ padding: "0.45rem" }}
+                          value={ticket.type}
+                          onChange={(e) =>
+                            handleTicketChange(index, "type", e.target.value)
+                          }
+                        >
+                          {[
+                            "単勝",
+                            "複勝",
+                            "応援馬券",
+                            "枠連",
+                            "馬連",
+                            "馬単",
+                            "ワイド",
+                            "3連複",
+                            "3連単",
+                          ].map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </select>
 
-                      <div
-                        style={{
-                          position: "relative",
-                          display: "flex",
-                          alignItems: "center",
-                        }}
-                      >
+                        <div
+                          style={{
+                            position: "relative",
+                            display: "flex",
+                            alignItems: "center",
+                          }}
+                        >
+                          <input
+                            type="text"
+                            className="input-control"
+                            style={{ padding: "0.45rem", width: "100%" }}
+                            placeholder="買い目 (例: BOX 3,5,6 / 1-2,3)"
+                            value={ticket.selection}
+                            onChange={(e) =>
+                              handleTicketChange(
+                                index,
+                                "selection",
+                                e.target.value,
+                              )
+                            }
+                            required
+                          />
+                          {isCombo && (
+                            <span
+                              style={{
+                                position: "absolute",
+                                right: "5px",
+                                background: "rgba(59, 130, 246, 0.2)",
+                                color: "var(--color-blue)",
+                                fontSize: "0.65rem",
+                                padding: "0.1rem 0.3rem",
+                                borderRadius: "4px",
+                                fontWeight: "bold",
+                              }}
+                            >
+                              {expanded.length}点
+                            </span>
+                          )}
+                        </div>
+
+                        <div
+                          style={{
+                            position: "relative",
+                            display: "flex",
+                            alignItems: "center",
+                          }}
+                        >
+                          <input
+                            type="number"
+                            className="input-control"
+                            style={{ padding: "0.45rem", width: "100%" }}
+                            placeholder="投資額"
+                            value={ticket.investment || ""}
+                            onChange={(e) =>
+                              handleTicketChange(
+                                index,
+                                "investment",
+                                e.target.value,
+                              )
+                            }
+                            required
+                          />
+                          {ticket.type === "応援馬券" && (
+                            <span
+                              style={{
+                                position: "absolute",
+                                right: "5px",
+                                background: "rgba(239, 68, 68, 0.2)",
+                                color: "var(--color-rose)",
+                                fontSize: "0.6rem",
+                                padding: "0.1rem 0.25rem",
+                                borderRadius: "4px",
+                                fontWeight: "bold",
+                              }}
+                            >
+                              ×2
+                            </span>
+                          )}
+                        </div>
+
                         <input
                           type="number"
                           className="input-control"
-                          style={{ padding: "0.45rem", width: "100%" }}
-                          placeholder="投資額"
-                          value={ticket.investment || ""}
+                          style={{ padding: "0.45rem" }}
+                          placeholder="払戻額"
+                          value={ticket.payout || ""}
                           onChange={(e) =>
-                            handleTicketChange(
-                              index,
-                              "investment",
-                              e.target.value,
-                            )
+                            handleTicketChange(index, "payout", e.target.value)
                           }
-                          required
                         />
-                        {ticket.type === "応援馬券" && (
-                          <span
-                            style={{
-                              position: "absolute",
-                              right: "5px",
-                              background: "rgba(239, 68, 68, 0.2)",
-                              color: "var(--color-rose)",
-                              fontSize: "0.6rem",
-                              padding: "0.1rem 0.25rem",
-                              borderRadius: "4px",
-                              fontWeight: "bold",
-                            }}
-                          >
-                            ×2
-                          </span>
-                        )}
-                      </div>
 
-                      <input
-                        type="number"
-                        className="input-control"
-                        style={{ padding: "0.45rem" }}
-                        placeholder="払戻額"
-                        value={ticket.payout || ""}
-                        onChange={(e) =>
-                          handleTicketChange(index, "payout", e.target.value)
-                        }
-                      />
-
-                      <button
-                        type="button"
-                        className={styles.removeTicketBtn}
-                        onClick={() => handleRemoveTicket(index)}
-                        disabled={tickets.length === 1}
-                        title="この馬券を削除"
-                      >
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
+                        <button
+                          type="button"
+                          className={styles.removeTicketBtn}
+                          onClick={() => handleRemoveTicket(index)}
+                          disabled={tickets.length === 1}
+                          title="この馬券を削除"
                         >
-                          <polyline points="3 6 5 6 21 6" />
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
+                        </button>
+                      </div>
+                    );
+                  })}
 
                   <div className={styles.ticketBtnGroup}>
                     <button
@@ -1480,6 +1721,11 @@ export default function Home() {
                                 <tbody>
                                   {memo.tickets.map((t, idx) => {
                                     const actualCost = getTicketCost(t);
+                                    const expanded = expandTicketSelection(
+                                      t.type,
+                                      t.selection,
+                                    );
+
                                     return (
                                       <tr key={idx}>
                                         <td>{t.type}</td>
@@ -1491,6 +1737,18 @@ export default function Home() {
                                           }}
                                         >
                                           {t.selection}
+                                          {expanded.length > 1 && (
+                                            <span
+                                              style={{
+                                                fontSize: "0.7rem",
+                                                color: "var(--color-blue)",
+                                                fontWeight: "bold",
+                                                marginLeft: "0.25rem",
+                                              }}
+                                            >
+                                              ({expanded.length}点)
+                                            </span>
+                                          )}
                                         </td>
                                         <td>
                                           {actualCost.toLocaleString()}円
@@ -1523,7 +1781,7 @@ export default function Home() {
                                           {t.payout > 0
                                             ? "的中 🎯"
                                             : actualCost > 0 && t.payout === 0
-                                              ? "不終 💸"
+                                              ? "不的中 💸"
                                               : "返還/未確定"}
                                         </td>
                                       </tr>
