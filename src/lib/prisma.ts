@@ -1,4 +1,5 @@
 import "dotenv/config";
+import path from "path";
 import { PrismaClient } from "@prisma/client";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 
@@ -11,9 +12,19 @@ let prismaInstance: PrismaClient;
 if (globalForPrisma.prisma) {
   prismaInstance = globalForPrisma.prisma;
 } else {
-  const databaseUrl = process.env.DATABASE_URL || "file:./dev.db";
+  let databaseUrl = process.env.DATABASE_URL || "file:./dev.db";
 
-  // Pass configuration object directly to PrismaBetterSqlite3 in Prisma v7
+  // Force absolute path resolution if using a relative file path for SQLite
+  if (databaseUrl.startsWith("file:.")) {
+    const absolutePath = path.join(process.cwd(), "dev.db");
+    databaseUrl = `file:${absolutePath}`;
+  }
+
+  console.log(
+    "[Prisma v7] Resolving absolute SQLite connection URL:",
+    databaseUrl,
+  );
+
   const adapter = new PrismaBetterSqlite3({
     url: databaseUrl,
   });
