@@ -33,6 +33,7 @@ export interface MemoData {
   memoText: string;
   result: "hit" | "miss" | "pending";
   resultList?: RaceResult[]; // Local variable mapped to resultList JSON in DB
+  netkeibaUrl?: string; // URL to netkeiba race page
   tickets: TicketData[];
 }
 
@@ -72,6 +73,7 @@ export async function getMemos(): Promise<MemoData[]> {
         memoText: m.memoText,
         result: m.result as "hit" | "miss" | "pending",
         resultList: parsedResults,
+        netkeibaUrl: m.netkeibaUrl || undefined,
         tickets: m.tickets.map((t) => ({
           id: t.id,
           type: t.type,
@@ -107,6 +109,7 @@ export async function saveMemo(data: Omit<MemoData, "id"> & { id?: string }) {
       memoText: data.memoText,
       result: data.result,
       resultList: serializedResults,
+      netkeibaUrl: data.netkeibaUrl || null,
     };
 
     if (data.id) {

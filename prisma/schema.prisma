@@ -24,6 +24,7 @@ model Memo {
   memoText   String
   result     String   // "hit" | "miss" | "pending"
   resultList String?  // Serialized JSON of top 5 finishing results
+  netkeibaUrl String? // netkeiba race URL or ID (optional)
   createdAt  DateTime @default(now())
   
   tickets    Ticket[]

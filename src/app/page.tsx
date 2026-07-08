@@ -288,6 +288,7 @@ export default function Home() {
   const [isFetching, setIsFetching] = useState(false);
   const [fetchedHorses, setFetchedHorses] = useState<ScrapedHorse[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [netkeibaUrl, setNetkeibaUrl] = useState("");
 
   // Scraped results data
   const [scrapedPayouts, setScrapedPayouts] = useState<
@@ -562,6 +563,13 @@ export default function Home() {
         showToast(`「${data.raceName}」の出走馬情報を取得しました！`);
       }
 
+      // Generate and save netkeiba link
+      let finalUrl = urlInput.trim();
+      if (/^\d{12}$/.test(finalUrl)) {
+        finalUrl = `https://race.netkeiba.com/race/result.html?race_id=${finalUrl}`;
+      }
+      setNetkeibaUrl(finalUrl);
+
       setUrlInput("");
     } catch (err) {
       // Fallback mock
@@ -583,6 +591,9 @@ export default function Home() {
         ]);
         setScrapedPayouts({});
         setScrapedResults([]);
+        setNetkeibaUrl(
+          "https://race.netkeiba.com/race/result.html?race_id=202606020411",
+        );
         showToast("有馬記念のモックデータを取得しました！(デモモード)");
       }, 1500);
     } finally {
@@ -643,6 +654,7 @@ export default function Home() {
       })),
     );
     setScrapedResults(memo.resultList || []);
+    setNetkeibaUrl(memo.netkeibaUrl || "");
 
     if (memo.resultList && memo.resultList.length > 0) {
       setFetchedHorses(
@@ -676,6 +688,7 @@ export default function Home() {
     setFetchedHorses([]);
     setScrapedPayouts({});
     setScrapedResults([]);
+    setNetkeibaUrl("");
     showToast("編集をキャンセルしました");
   };
 
@@ -711,6 +724,7 @@ export default function Home() {
       memoText,
       result: finalResult,
       resultList: scrapedResults,
+      netkeibaUrl: netkeibaUrl || undefined,
       tickets: tickets.map((t) => ({
         type: t.type,
         selection: t.selection,
@@ -745,6 +759,7 @@ export default function Home() {
       setFetchedHorses([]);
       setScrapedPayouts({});
       setScrapedResults([]);
+      setNetkeibaUrl("");
     } else {
       showToast(res.error || "保存に失敗しました");
     }
@@ -1685,6 +1700,58 @@ export default function Home() {
                       {/* Detail Expand Area */}
                       {activeMemoId === memo.id && (
                         <div className={styles.memoDetail}>
+                          {/* netkeiba Link */}
+                          {memo.netkeibaUrl && (
+                            <div
+                              style={{
+                                marginBottom: "0.75rem",
+                                display: "flex",
+                              }}
+                            >
+                              <a
+                                href={memo.netkeibaUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "0.35rem",
+                                  fontSize: "0.75rem",
+                                  color: "var(--color-gold)",
+                                  textDecoration: "none",
+                                  fontWeight: "600",
+                                  background: "rgba(234, 179, 8, 0.08)",
+                                  padding: "0.3rem 0.6rem",
+                                  borderRadius: "6px",
+                                  border: "1px solid rgba(234, 179, 8, 0.25)",
+                                  transition: "all 0.2s ease",
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background =
+                                    "rgba(234, 179, 8, 0.15)";
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background =
+                                    "rgba(234, 179, 8, 0.08)";
+                                }}
+                              >
+                                <span>netkeibaでレースを見る</span>
+                                <svg
+                                  width="12"
+                                  height="12"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.5"
+                                >
+                                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                  <polyline points="15 3 21 3 21 9" />
+                                  <line x1="10" y1="14" x2="21" y2="3" />
+                                </svg>
+                              </a>
+                            </div>
+                          )}
+
                           {/* Prediction Badges */}
                           <div className={styles.predictionsBox}>
                             <div className={styles.predItem}>
