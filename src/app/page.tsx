@@ -281,6 +281,22 @@ const INITIAL_MEMOS: Omit<MemoData, "id">[] = [
   },
 ];
 
+const normalizeDate = (dateStr: string): string => {
+  if (!dateStr) return "";
+  const clean = dateStr
+    .replace(/[年月]/g, "-")
+    .replace(/日/g, "")
+    .replace(/\//g, "-");
+  const parts = clean.split("-");
+  if (parts.length === 3) {
+    const y = parts[0].trim();
+    const m = parts[1].trim().padStart(2, "0");
+    const d = parts[2].trim().padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  return dateStr;
+};
+
 export default function Home() {
   const [memos, setMemos] = useState<MemoData[]>([]);
   const [activeMemoId, setActiveMemoId] = useState<string | null>(null);
@@ -308,8 +324,10 @@ export default function Home() {
     const prevMonthLastDay = new Date(year, month, 0).getDate();
     for (let i = startOffset - 1; i >= 0; i--) {
       const prevDate = new Date(year, month - 1, prevMonthLastDay - i);
+      const offset = prevDate.getTimezoneOffset();
+      const localPrevDate = new Date(prevDate.getTime() - offset * 60 * 1000);
       days.push({
-        dateStr: prevDate.toISOString().split("T")[0],
+        dateStr: localPrevDate.toISOString().split("T")[0],
         dayNum: prevMonthLastDay - i,
         isCurrentMonth: false,
       });
@@ -331,8 +349,10 @@ export default function Home() {
     const remainingCells = (7 - (days.length % 7)) % 7;
     for (let i = 1; i <= remainingCells; i++) {
       const nextDate = new Date(year, month + 1, i);
+      const offset = nextDate.getTimezoneOffset();
+      const localNextDate = new Date(nextDate.getTime() - offset * 60 * 1000);
       days.push({
-        dateStr: nextDate.toISOString().split("T")[0],
+        dateStr: localNextDate.toISOString().split("T")[0],
         dayNum: i,
         isCurrentMonth: false,
       });
@@ -685,6 +705,7 @@ export default function Home() {
 
   // Load saved memo into form for editing
   const handleEdit = (memo: MemoData) => {
+    setViewMode("list");
     setEditingId(memo.id || null);
     setDate(memo.date);
     setTrack(memo.track);
@@ -727,6 +748,7 @@ export default function Home() {
   // Cancel edit mode
   const handleCancelEdit = () => {
     setEditingId(null);
+    setDate("");
     setRaceName("");
     setHonmei("");
     setTaiko("");
@@ -787,11 +809,21 @@ export default function Home() {
 
     const res = await saveMemo(memoPayload);
     if (res.success) {
+      const savedDate = memoPayload.date;
+      if (viewMode === "calendar") {
+        setSelectedDateStr(savedDate);
+        // Safely set calendar month view avoiding timezone shift
+        const [y, m] = savedDate.split("-").map(Number);
+        setCalendarDate(new Date(y, m - 1, 1));
+        setActiveMemoId(editingId || res.id || null);
+      }
+
       await refreshMemos();
       showToast(editingId ? "ログを更新しました" : "ログを保存しました");
 
       // Reset form fields
       setEditingId(null);
+      setDate("");
       setRaceName("");
       setHonmei("");
       setTaiko("");
@@ -824,7 +856,9 @@ export default function Home() {
       if (res.success) {
         if (selectedDateStr) {
           const remainingForDay = memos.filter(
-            (m) => m.id !== id && m.date === selectedDateStr,
+            (m) =>
+              m.id !== id &&
+              normalizeDate(m.date) === normalizeDate(selectedDateStr),
           ).length;
           if (remainingForDay === 0) {
             setSelectedDateStr(null);
@@ -1865,7 +1899,7 @@ export default function Home() {
                       calendarDate.getMonth(),
                     ).map((day) => {
                       const dayMemos = memos.filter(
-                        (m) => m.date === day.dateStr,
+                        (m) => normalizeDate(m.date) === day.dateStr,
                       );
 
                       let dayInvest = 0;
@@ -1885,7 +1919,9 @@ export default function Home() {
                       const dayDiff = dayPayout - dayInvest;
                       const hasRecords = dayMemos.length > 0;
 
-                      const isSelected = selectedDateStr === day.dateStr;
+                      const isSelected =
+                        selectedDateStr !== null &&
+                        normalizeDate(selectedDateStr) === day.dateStr;
                       const isToday =
                         day.dateStr === new Date().toISOString().split("T")[0];
 
@@ -1994,7 +2030,14 @@ export default function Home() {
                 >
                   <span>
                     📅 {selectedDateStr} の記録 (
-                    {memos.filter((m) => m.date === selectedDateStr).length}件)
+                    {
+                      memos.filter(
+                        (m) =>
+                          normalizeDate(m.date) ===
+                          normalizeDate(selectedDateStr),
+                      ).length
+                    }
+                    件)
                   </span>
                   <button
                     type="button"
@@ -2042,7 +2085,10 @@ export default function Home() {
                 memos
                   .filter((memo) => {
                     if (viewMode === "list") return true;
-                    return memo.date === selectedDateStr;
+                    return (
+                      normalizeDate(memo.date) ===
+                      normalizeDate(selectedDateStr!)
+                    );
                   })
                   .map((memo) => {
                     if (!memo.id) return null;
