@@ -289,6 +289,57 @@ export default function Home() {
   const [fetchedHorses, setFetchedHorses] = useState<ScrapedHorse[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [netkeibaUrl, setNetkeibaUrl] = useState("");
+  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+  const [calendarDate, setCalendarDate] = useState(new Date());
+  const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
+
+  // Get calendar grid days (including padding from prev/next month)
+  const getCalendarDays = (year: number, month: number) => {
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+
+    const startOffset = firstDay.getDay();
+    const totalDays = lastDay.getDate();
+
+    const days: { dateStr: string; dayNum: number; isCurrentMonth: boolean }[] =
+      [];
+
+    // Padding from previous month
+    const prevMonthLastDay = new Date(year, month, 0).getDate();
+    for (let i = startOffset - 1; i >= 0; i--) {
+      const prevDate = new Date(year, month - 1, prevMonthLastDay - i);
+      days.push({
+        dateStr: prevDate.toISOString().split("T")[0],
+        dayNum: prevMonthLastDay - i,
+        isCurrentMonth: false,
+      });
+    }
+
+    // Current month days
+    for (let i = 1; i <= totalDays; i++) {
+      const d = new Date(year, month, i);
+      const offset = d.getTimezoneOffset();
+      const localD = new Date(d.getTime() - offset * 60 * 1000);
+      days.push({
+        dateStr: localD.toISOString().split("T")[0],
+        dayNum: i,
+        isCurrentMonth: true,
+      });
+    }
+
+    // Padding for next month
+    const remainingCells = (7 - (days.length % 7)) % 7;
+    for (let i = 1; i <= remainingCells; i++) {
+      const nextDate = new Date(year, month + 1, i);
+      days.push({
+        dateStr: nextDate.toISOString().split("T")[0],
+        dayNum: i,
+        isCurrentMonth: false,
+      });
+    }
+
+    return days;
+  };
 
   // Scraped results data
   const [scrapedPayouts, setScrapedPayouts] = useState<
@@ -771,6 +822,14 @@ export default function Home() {
     if (window.confirm("このメモを削除してもよろしいですか？")) {
       const res = await deleteMemo(id);
       if (res.success) {
+        if (selectedDateStr) {
+          const remainingForDay = memos.filter(
+            (m) => m.id !== id && m.date === selectedDateStr,
+          ).length;
+          if (remainingForDay === 0) {
+            setSelectedDateStr(null);
+          }
+        }
         await refreshMemos();
         if (activeMemoId === id) setActiveMemoId(null);
         showToast("メモを削除しました");
@@ -1604,25 +1663,374 @@ export default function Home() {
 
           {/* Right Column: Logs List */}
           <div className={`${styles.historyCard} card`}>
-            <h2 className={styles.sectionTitle}>
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--color-gold)"
-                strokeWidth="2.5"
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "1rem",
+                flexWrap: "wrap",
+                gap: "0.5rem",
+                borderBottom: "1px solid var(--border-color)",
+                paddingBottom: "0.75rem",
+              }}
+            >
+              <h2 className={styles.sectionTitle} style={{ margin: 0 }}>
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--color-gold)"
+                  strokeWidth="2.5"
+                >
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <polyline points="10 9 9 9 8 9" />
+                </svg>
+                ログ履歴 ({memos.length}件)
+              </h2>
+
+              {/* View Toggle Tabs */}
+              <div
+                style={{
+                  display: "flex",
+                  background: "rgba(255, 255, 255, 0.03)",
+                  padding: "2px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-color)",
+                }}
               >
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-                <polyline points="10 9 9 9 8 9" />
-              </svg>
-              ログ履歴 ({memos.length}件)
-            </h2>
+                <button
+                  type="button"
+                  style={{
+                    padding: "0.35rem 0.75rem",
+                    fontSize: "0.75rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    background:
+                      viewMode === "list" ? "var(--color-blue)" : "transparent",
+                    color:
+                      viewMode === "list" ? "#ffffff" : "var(--text-secondary)",
+                    cursor: "pointer",
+                    fontWeight: "600",
+                    transition: "all 0.2s ease",
+                  }}
+                  onClick={() => setViewMode("list")}
+                >
+                  リスト
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    padding: "0.35rem 0.75rem",
+                    fontSize: "0.75rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    background:
+                      viewMode === "calendar"
+                        ? "var(--color-blue)"
+                        : "transparent",
+                    color:
+                      viewMode === "calendar"
+                        ? "#ffffff"
+                        : "var(--text-secondary)",
+                    cursor: "pointer",
+                    fontWeight: "600",
+                    transition: "all 0.2s ease",
+                  }}
+                  onClick={() => {
+                    setViewMode("calendar");
+                    setSelectedDateStr(null);
+                  }}
+                >
+                  カレンダー
+                </button>
+              </div>
+            </div>
 
             <div className={styles.scrollArea}>
+              {viewMode === "calendar" && (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    marginBottom: "1.25rem",
+                    borderBottom: "1px solid var(--border-color)",
+                    paddingBottom: "1.25rem",
+                  }}
+                >
+                  {/* Calendar Navigation */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "1rem",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newDate = new Date(
+                          calendarDate.getFullYear(),
+                          calendarDate.getMonth() - 1,
+                          1,
+                        );
+                        setCalendarDate(newDate);
+                      }}
+                      style={{
+                        background: "rgba(255, 255, 255, 0.03)",
+                        border: "1px solid var(--border-color)",
+                        color: "var(--text-primary)",
+                        borderRadius: "6px",
+                        width: "30px",
+                        height: "30px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      &lt;
+                    </button>
+                    <span style={{ fontWeight: "700", fontSize: "0.95rem" }}>
+                      {calendarDate.getFullYear()}年{" "}
+                      {calendarDate.getMonth() + 1}月
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newDate = new Date(
+                          calendarDate.getFullYear(),
+                          calendarDate.getMonth() + 1,
+                          1,
+                        );
+                        setCalendarDate(newDate);
+                      }}
+                      style={{
+                        background: "rgba(255, 255, 255, 0.03)",
+                        border: "1px solid var(--border-color)",
+                        color: "var(--text-primary)",
+                        borderRadius: "6px",
+                        width: "30px",
+                        height: "30px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      &gt;
+                    </button>
+                  </div>
+
+                  {/* Day-of-week headers */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(7, 1fr)",
+                      textAlign: "center",
+                      fontSize: "0.7rem",
+                      fontWeight: "600",
+                      color: "var(--text-secondary)",
+                      marginBottom: "0.5rem",
+                    }}
+                  >
+                    {["日", "月", "火", "水", "木", "金", "土"].map(
+                      (day, idx) => (
+                        <div
+                          key={day}
+                          style={{
+                            color:
+                              idx === 0
+                                ? "var(--color-rose)"
+                                : idx === 6
+                                  ? "var(--color-blue)"
+                                  : "inherit",
+                          }}
+                        >
+                          {day}
+                        </div>
+                      ),
+                    )}
+                  </div>
+
+                  {/* Days grid */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(7, 1fr)",
+                      gap: "4px",
+                    }}
+                  >
+                    {getCalendarDays(
+                      calendarDate.getFullYear(),
+                      calendarDate.getMonth(),
+                    ).map((day) => {
+                      const dayMemos = memos.filter(
+                        (m) => m.date === day.dateStr,
+                      );
+
+                      let dayInvest = 0;
+                      let dayPayout = 0;
+                      let hasHit = false;
+                      for (const m of dayMemos) {
+                        dayInvest += m.tickets.reduce(
+                          (sum, t) => sum + getTicketCost(t),
+                          0,
+                        );
+                        dayPayout += m.tickets.reduce(
+                          (sum, t) => sum + t.payout,
+                          0,
+                        );
+                        if (m.result === "hit") hasHit = true;
+                      }
+                      const dayDiff = dayPayout - dayInvest;
+                      const hasRecords = dayMemos.length > 0;
+
+                      const isSelected = selectedDateStr === day.dateStr;
+                      const isToday =
+                        day.dateStr === new Date().toISOString().split("T")[0];
+
+                      return (
+                        <div
+                          key={day.dateStr}
+                          onClick={() => {
+                            if (hasRecords) {
+                              const nextSelected = isSelected
+                                ? null
+                                : day.dateStr;
+                              setSelectedDateStr(nextSelected);
+                              if (nextSelected) {
+                                if (dayMemos.length > 0 && dayMemos[0].id) {
+                                  setActiveMemoId(dayMemos[0].id);
+                                }
+                              } else {
+                                setActiveMemoId(null);
+                              }
+                            }
+                          }}
+                          style={{
+                            minHeight: "55px",
+                            background: isSelected
+                              ? "rgba(59, 130, 246, 0.15)"
+                              : day.isCurrentMonth
+                                ? "rgba(255, 255, 255, 0.02)"
+                                : "rgba(255, 255, 255, 0.005)",
+                            border: isSelected
+                              ? "1px solid var(--color-blue)"
+                              : isToday
+                                ? "1px solid var(--color-gold)"
+                                : "1px solid var(--border-color)",
+                            borderRadius: "6px",
+                            padding: "4px",
+                            display: "flex",
+                            flexDirection: "column",
+                            justifyContent: "space-between",
+                            cursor: hasRecords ? "pointer" : "default",
+                            opacity: day.isCurrentMonth ? 1 : 0.4,
+                            transition: "all 0.2s ease",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "0.75rem",
+                              fontWeight: "700",
+                              color: isToday
+                                ? "var(--color-gold)"
+                                : "var(--text-primary)",
+                            }}
+                          >
+                            {day.dayNum}
+                            {hasHit && (
+                              <span
+                                style={{
+                                  marginLeft: "2px",
+                                  fontSize: "0.65rem",
+                                }}
+                              >
+                                🎯
+                              </span>
+                            )}
+                          </div>
+
+                          {hasRecords && (
+                            <div
+                              style={{
+                                fontSize: "0.65rem",
+                                fontWeight: "800",
+                                textAlign: "right",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                color:
+                                  dayDiff > 0
+                                    ? "var(--color-emerald)"
+                                    : dayDiff < 0
+                                      ? "var(--color-rose)"
+                                      : "var(--text-secondary)",
+                              }}
+                            >
+                              {dayDiff > 0 ? "+" : ""}
+                              {dayDiff.toLocaleString()}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Title helper for calendar-filtered logs view */}
+              {viewMode === "calendar" && selectedDateStr && (
+                <div
+                  style={{
+                    fontSize: "0.85rem",
+                    fontWeight: "700",
+                    marginBottom: "0.75rem",
+                    color: "var(--color-blue)",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>
+                    📅 {selectedDateStr} の記録 (
+                    {memos.filter((m) => m.date === selectedDateStr).length}件)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDateStr(null)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "var(--text-secondary)",
+                      fontSize: "0.7rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    選択解除
+                  </button>
+                </div>
+              )}
+
+              {viewMode === "calendar" && !selectedDateStr && (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "1.5rem 1rem",
+                    color: "var(--text-muted)",
+                    fontSize: "0.8rem",
+                    border: "1px dashed var(--border-color)",
+                    borderRadius: "8px",
+                    background: "rgba(255, 255, 255, 0.01)",
+                  }}
+                >
+                  <p>
+                    📅
+                    カレンダーの日付を選択すると、その日のログがここに表示されます。
+                  </p>
+                </div>
+              )}
+
               {memos.length === 0 ? (
                 <div className={styles.noMemos}>
                   <p>まだ記録はありません。</p>
@@ -1631,48 +2039,53 @@ export default function Home() {
                   </p>
                 </div>
               ) : (
-                memos.map((memo) => {
-                  if (!memo.id) return null;
+                memos
+                  .filter((memo) => {
+                    if (viewMode === "list") return true;
+                    return memo.date === selectedDateStr;
+                  })
+                  .map((memo) => {
+                    if (!memo.id) return null;
 
-                  // Aggregate totals for this memo (accounting for Support wagers)
-                  const totalInvest = memo.tickets.reduce(
-                    (sum, t) => sum + getTicketCost(t),
-                    0,
-                  );
-                  const totalPay = memo.tickets.reduce(
-                    (sum, t) => sum + t.payout,
-                    0,
-                  );
-                  const diff = totalPay - totalInvest;
+                    // Aggregate totals for this memo (accounting for Support wagers)
+                    const totalInvest = memo.tickets.reduce(
+                      (sum, t) => sum + getTicketCost(t),
+                      0,
+                    );
+                    const totalPay = memo.tickets.reduce(
+                      (sum, t) => sum + t.payout,
+                      0,
+                    );
+                    const diff = totalPay - totalInvest;
 
-                  const isPending = memo.result === "pending";
-                  const isHit = memo.result === "hit";
+                    const isPending = memo.result === "pending";
+                    const isHit = memo.result === "hit";
 
-                  return (
-                    <div key={memo.id} className={styles.memoItem}>
-                      {/* Summary Row */}
-                      <div
-                        className={styles.memoHeader}
-                        onClick={() => toggleDetail(memo.id!)}
-                      >
-                        <div className={styles.memoInfo}>
-                          <div className={styles.raceMeta}>
-                            <span>{memo.date}</span>
-                            <span className={styles.raceTrackBadge}>
-                              {memo.track} {memo.raceNumber}R
-                            </span>
+                    return (
+                      <div key={memo.id} className={styles.memoItem}>
+                        {/* Summary Row */}
+                        <div
+                          className={styles.memoHeader}
+                          onClick={() => toggleDetail(memo.id!)}
+                        >
+                          <div className={styles.memoInfo}>
+                            <div className={styles.raceMeta}>
+                              <span>{memo.date}</span>
+                              <span className={styles.raceTrackBadge}>
+                                {memo.track} {memo.raceNumber}R
+                              </span>
+                            </div>
+                            <div className={styles.raceTitle}>
+                              {memo.raceName}
+                              {isHit && (
+                                <span style={{ fontSize: "0.9rem" }}>🎯</span>
+                              )}
+                            </div>
                           </div>
-                          <div className={styles.raceTitle}>
-                            {memo.raceName}
-                            {isHit && (
-                              <span style={{ fontSize: "0.9rem" }}>🎯</span>
-                            )}
-                          </div>
-                        </div>
 
-                        <div className={styles.memoIncome}>
-                          <div
-                            className={`
+                          <div className={styles.memoIncome}>
+                            <div
+                              className={`
                             ${styles.incomeValue} 
                             ${
                               isPending
@@ -1684,358 +2097,360 @@ export default function Home() {
                                     : styles.incomeZero
                             }
                           `}
-                          >
-                            {isPending
-                              ? "結果待ち"
-                              : `${diff >= 0 ? "+" : ""}${diff.toLocaleString()}円`}
-                          </div>
-                          <span className={styles.ticketTypeBadge}>
-                            {memo.tickets.length > 0
-                              ? `${memo.tickets[0].type}他 ${memo.tickets.length}件`
-                              : "馬券なし"}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Detail Expand Area */}
-                      {activeMemoId === memo.id && (
-                        <div className={styles.memoDetail}>
-                          {/* netkeiba Link */}
-                          {memo.netkeibaUrl && (
-                            <div
-                              style={{
-                                marginBottom: "0.75rem",
-                                display: "flex",
-                              }}
                             >
-                              <a
-                                href={memo.netkeibaUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "0.35rem",
-                                  fontSize: "0.75rem",
-                                  color: "var(--color-gold)",
-                                  textDecoration: "none",
-                                  fontWeight: "600",
-                                  background: "rgba(234, 179, 8, 0.08)",
-                                  padding: "0.3rem 0.6rem",
-                                  borderRadius: "6px",
-                                  border: "1px solid rgba(234, 179, 8, 0.25)",
-                                  transition: "all 0.2s ease",
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.background =
-                                    "rgba(234, 179, 8, 0.15)";
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.background =
-                                    "rgba(234, 179, 8, 0.08)";
-                                }}
-                              >
-                                <span>netkeibaでレースを見る</span>
-                                <svg
-                                  width="12"
-                                  height="12"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2.5"
-                                >
-                                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                                  <polyline points="15 3 21 3 21 9" />
-                                  <line x1="10" y1="14" x2="21" y2="3" />
-                                </svg>
-                              </a>
+                              {isPending
+                                ? "結果待ち"
+                                : `${diff >= 0 ? "+" : ""}${diff.toLocaleString()}円`}
                             </div>
-                          )}
-
-                          {/* Prediction Badges */}
-                          <div className={styles.predictionsBox}>
-                            <div className={styles.predItem}>
-                              <span
-                                className="mark-badge mark-honmei active"
-                                style={{
-                                  width: "22px",
-                                  height: "22px",
-                                  fontSize: "0.75rem",
-                                }}
-                              >
-                                ◎
-                              </span>
-                              <span className={styles.predText}>
-                                {memo.prediction.honmei || "無印"}
-                              </span>
-                            </div>
-                            <div className={styles.predItem}>
-                              <span
-                                className="mark-badge mark-taiko active"
-                                style={{
-                                  width: "22px",
-                                  height: "22px",
-                                  fontSize: "0.75rem",
-                                }}
-                              >
-                                ◯
-                              </span>
-                              <span className={styles.predText}>
-                                {memo.prediction.taiko || "無印"}
-                              </span>
-                            </div>
-                            <div className={styles.predItem}>
-                              <span
-                                className="mark-badge mark-anago active"
-                                style={{
-                                  width: "22px",
-                                  height: "22px",
-                                  fontSize: "0.75rem",
-                                }}
-                              >
-                                ▲
-                              </span>
-                              <span className={styles.predText}>
-                                {memo.prediction.anago || "無印"}
-                              </span>
-                            </div>
-                            <div className={styles.predItem}>
-                              <span
-                                className="mark-badge mark-renge active"
-                                style={{
-                                  width: "22px",
-                                  height: "22px",
-                                  fontSize: "0.75rem",
-                                }}
-                              >
-                                △
-                              </span>
-                              <span className={styles.predText}>
-                                {memo.prediction.renge || "無印"}
-                              </span>
-                            </div>
+                            <span className={styles.ticketTypeBadge}>
+                              {memo.tickets.length > 0
+                                ? `${memo.tickets[0].type}他 ${memo.tickets.length}件`
+                                : "馬券なし"}
+                            </span>
                           </div>
+                        </div>
 
-                          {/* Saved Race Results (Finishing positions) */}
-                          {memo.resultList && memo.resultList.length > 0 && (
-                            <div>
+                        {/* Detail Expand Area */}
+                        {activeMemoId === memo.id && (
+                          <div className={styles.memoDetail}>
+                            {/* netkeiba Link */}
+                            {memo.netkeibaUrl && (
                               <div
                                 style={{
-                                  fontSize: "0.8rem",
-                                  fontWeight: "600",
-                                  color: "var(--text-secondary)",
-                                  marginBottom: "0.35rem",
+                                  marginBottom: "0.75rem",
+                                  display: "flex",
                                 }}
                               >
-                                確定結果 (着順)
+                                <a
+                                  href={memo.netkeibaUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "0.35rem",
+                                    fontSize: "0.75rem",
+                                    color: "var(--color-gold)",
+                                    textDecoration: "none",
+                                    fontWeight: "600",
+                                    background: "rgba(234, 179, 8, 0.08)",
+                                    padding: "0.3rem 0.6rem",
+                                    borderRadius: "6px",
+                                    border: "1px solid rgba(234, 179, 8, 0.25)",
+                                    transition: "all 0.2s ease",
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.background =
+                                      "rgba(234, 179, 8, 0.15)";
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background =
+                                      "rgba(234, 179, 8, 0.08)";
+                                  }}
+                                >
+                                  <span>netkeibaでレースを見る</span>
+                                  <svg
+                                    width="12"
+                                    height="12"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2.5"
+                                  >
+                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                    <polyline points="15 3 21 3 21 9" />
+                                    <line x1="10" y1="14" x2="21" y2="3" />
+                                  </svg>
+                                </a>
+                              </div>
+                            )}
+
+                            {/* Prediction Badges */}
+                            <div className={styles.predictionsBox}>
+                              <div className={styles.predItem}>
+                                <span
+                                  className="mark-badge mark-honmei active"
+                                  style={{
+                                    width: "22px",
+                                    height: "22px",
+                                    fontSize: "0.75rem",
+                                  }}
+                                >
+                                  ◎
+                                </span>
+                                <span className={styles.predText}>
+                                  {memo.prediction.honmei || "無印"}
+                                </span>
+                              </div>
+                              <div className={styles.predItem}>
+                                <span
+                                  className="mark-badge mark-taiko active"
+                                  style={{
+                                    width: "22px",
+                                    height: "22px",
+                                    fontSize: "0.75rem",
+                                  }}
+                                >
+                                  ◯
+                                </span>
+                                <span className={styles.predText}>
+                                  {memo.prediction.taiko || "無印"}
+                                </span>
+                              </div>
+                              <div className={styles.predItem}>
+                                <span
+                                  className="mark-badge mark-anago active"
+                                  style={{
+                                    width: "22px",
+                                    height: "22px",
+                                    fontSize: "0.75rem",
+                                  }}
+                                >
+                                  ▲
+                                </span>
+                                <span className={styles.predText}>
+                                  {memo.prediction.anago || "無印"}
+                                </span>
+                              </div>
+                              <div className={styles.predItem}>
+                                <span
+                                  className="mark-badge mark-renge active"
+                                  style={{
+                                    width: "22px",
+                                    height: "22px",
+                                    fontSize: "0.75rem",
+                                  }}
+                                >
+                                  △
+                                </span>
+                                <span className={styles.predText}>
+                                  {memo.prediction.renge || "無印"}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Saved Race Results (Finishing positions) */}
+                            {memo.resultList && memo.resultList.length > 0 && (
+                              <div>
+                                <div
+                                  style={{
+                                    fontSize: "0.8rem",
+                                    fontWeight: "600",
+                                    color: "var(--text-secondary)",
+                                    marginBottom: "0.35rem",
+                                  }}
+                                >
+                                  確定結果 (着順)
+                                </div>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    gap: "0.4rem",
+                                    flexWrap: "wrap",
+                                    fontSize: "0.75rem",
+                                    marginBottom: "0.5rem",
+                                  }}
+                                >
+                                  {memo.resultList.map((res) => (
+                                    <div
+                                      key={res.rank}
+                                      style={{
+                                        background: "rgba(255, 255, 255, 0.02)",
+                                        padding: "0.25rem 0.5rem",
+                                        borderRadius: "6px",
+                                        border: "1px solid var(--border-color)",
+                                        display: "flex",
+                                        gap: "0.35rem",
+                                      }}
+                                    >
+                                      <span
+                                        style={{
+                                          fontWeight: "800",
+                                          color:
+                                            res.rank === 1
+                                              ? "var(--color-gold)"
+                                              : res.rank === 2
+                                                ? "var(--text-secondary)"
+                                                : "var(--text-muted)",
+                                        }}
+                                      >
+                                        {res.rank}着
+                                      </span>
+                                      <span style={{ fontWeight: "600" }}>
+                                        {res.horseNumber}
+                                      </span>
+                                      <span>
+                                        {res.horseName}
+                                        {res.jockey && (
+                                          <span
+                                            style={{
+                                              fontSize: "0.75rem",
+                                              color: "var(--text-secondary)",
+                                              marginLeft: "0.25rem",
+                                            }}
+                                          >
+                                            ({res.jockey})
+                                          </span>
+                                        )}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Purchased Tickets Detail Table */}
+                            {memo.tickets.length > 0 && (
+                              <div style={{ marginTop: "0.25rem" }}>
+                                <div
+                                  style={{
+                                    fontSize: "0.8rem",
+                                    fontWeight: "600",
+                                    color: "var(--text-secondary)",
+                                    marginBottom: "0.25rem",
+                                  }}
+                                >
+                                  購入した馬券
+                                </div>
+                                <table className={styles.logTicketsTable}>
+                                  <thead>
+                                    <tr>
+                                      <th>式別</th>
+                                      <th>買い目</th>
+                                      <th>投資額</th>
+                                      <th>払戻額</th>
+                                      <th>結果</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {memo.tickets.map((t, idx) => {
+                                      const actualCost = getTicketCost(t);
+                                      const expanded = expandTicketSelection(
+                                        t.type,
+                                        t.selection,
+                                      );
+
+                                      return (
+                                        <tr key={idx}>
+                                          <td>{t.type}</td>
+                                          <td
+                                            style={{
+                                              fontFamily:
+                                                "var(--font-outfit), sans-serif",
+                                              fontWeight: "600",
+                                            }}
+                                          >
+                                            {t.selection}
+                                            {expanded.length > 1 && (
+                                              <span
+                                                style={{
+                                                  fontSize: "0.7rem",
+                                                  color: "var(--color-blue)",
+                                                  fontWeight: "bold",
+                                                  marginLeft: "0.25rem",
+                                                }}
+                                              >
+                                                ({expanded.length}点)
+                                              </span>
+                                            )}
+                                          </td>
+                                          <td>
+                                            {actualCost.toLocaleString()}円
+                                            {t.type === "応援馬券" && (
+                                              <span
+                                                style={{
+                                                  fontSize: "0.7rem",
+                                                  opacity: 0.6,
+                                                  marginLeft: "0.2rem",
+                                                }}
+                                              >
+                                                (単{t.investment} / 複
+                                                {t.investment})
+                                              </span>
+                                            )}
+                                          </td>
+                                          <td>{t.payout.toLocaleString()}円</td>
+                                          <td
+                                            style={{
+                                              fontWeight: "bold",
+                                              color:
+                                                t.payout > 0
+                                                  ? "var(--color-emerald)"
+                                                  : actualCost > 0 &&
+                                                      t.payout === 0
+                                                    ? "var(--color-rose)"
+                                                    : "var(--text-secondary)",
+                                            }}
+                                          >
+                                            {t.payout > 0
+                                              ? "的中 🎯"
+                                              : actualCost > 0 && t.payout === 0
+                                                ? "不的中 💸"
+                                                : "返還/未確定"}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+
+                            {/* Notes */}
+                            {memo.memoText && (
+                              <div className={styles.memoTextBox}>
+                                <div className={styles.memoTextTitle}>
+                                  考察・メモ
+                                </div>
+                                <div className={styles.memoTextContent}>
+                                  {memo.memoText}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Footer details */}
+                            <div className={styles.detailFooter}>
+                              <div className={styles.detailStats}>
+                                <span>
+                                  総投資: {totalInvest.toLocaleString()}円
+                                </span>
+                                <span>
+                                  総払戻: {totalPay.toLocaleString()}円
+                                </span>
                               </div>
                               <div
                                 style={{
                                   display: "flex",
-                                  gap: "0.4rem",
-                                  flexWrap: "wrap",
-                                  fontSize: "0.75rem",
-                                  marginBottom: "0.5rem",
+                                  gap: "0.5rem",
                                 }}
                               >
-                                {memo.resultList.map((res) => (
-                                  <div
-                                    key={res.rank}
-                                    style={{
-                                      background: "rgba(255, 255, 255, 0.02)",
-                                      padding: "0.25rem 0.5rem",
-                                      borderRadius: "6px",
-                                      border: "1px solid var(--border-color)",
-                                      display: "flex",
-                                      gap: "0.35rem",
-                                    }}
-                                  >
-                                    <span
-                                      style={{
-                                        fontWeight: "800",
-                                        color:
-                                          res.rank === 1
-                                            ? "var(--color-gold)"
-                                            : res.rank === 2
-                                              ? "var(--text-secondary)"
-                                              : "var(--text-muted)",
-                                      }}
-                                    >
-                                      {res.rank}着
-                                    </span>
-                                    <span style={{ fontWeight: "600" }}>
-                                      {res.horseNumber}
-                                    </span>
-                                    <span>
-                                      {res.horseName}
-                                      {res.jockey && (
-                                        <span
-                                          style={{
-                                            fontSize: "0.75rem",
-                                            color: "var(--text-secondary)",
-                                            marginLeft: "0.25rem",
-                                          }}
-                                        >
-                                          ({res.jockey})
-                                        </span>
-                                      )}
-                                    </span>
-                                  </div>
-                                ))}
+                                <button
+                                  type="button"
+                                  className={styles.deleteBtn}
+                                  style={{
+                                    backgroundColor: "rgba(59, 130, 246, 0.15)",
+                                    color: "var(--color-blue)",
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleEdit(memo);
+                                  }}
+                                >
+                                  編集
+                                </button>
+                                <button
+                                  className={styles.deleteBtn}
+                                  onClick={(e) => handleDelete(memo.id!, e)}
+                                >
+                                  削除
+                                </button>
                               </div>
-                            </div>
-                          )}
-
-                          {/* Purchased Tickets Detail Table */}
-                          {memo.tickets.length > 0 && (
-                            <div style={{ marginTop: "0.25rem" }}>
-                              <div
-                                style={{
-                                  fontSize: "0.8rem",
-                                  fontWeight: "600",
-                                  color: "var(--text-secondary)",
-                                  marginBottom: "0.25rem",
-                                }}
-                              >
-                                購入した馬券
-                              </div>
-                              <table className={styles.logTicketsTable}>
-                                <thead>
-                                  <tr>
-                                    <th>式別</th>
-                                    <th>買い目</th>
-                                    <th>投資額</th>
-                                    <th>払戻額</th>
-                                    <th>結果</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {memo.tickets.map((t, idx) => {
-                                    const actualCost = getTicketCost(t);
-                                    const expanded = expandTicketSelection(
-                                      t.type,
-                                      t.selection,
-                                    );
-
-                                    return (
-                                      <tr key={idx}>
-                                        <td>{t.type}</td>
-                                        <td
-                                          style={{
-                                            fontFamily:
-                                              "var(--font-outfit), sans-serif",
-                                            fontWeight: "600",
-                                          }}
-                                        >
-                                          {t.selection}
-                                          {expanded.length > 1 && (
-                                            <span
-                                              style={{
-                                                fontSize: "0.7rem",
-                                                color: "var(--color-blue)",
-                                                fontWeight: "bold",
-                                                marginLeft: "0.25rem",
-                                              }}
-                                            >
-                                              ({expanded.length}点)
-                                            </span>
-                                          )}
-                                        </td>
-                                        <td>
-                                          {actualCost.toLocaleString()}円
-                                          {t.type === "応援馬券" && (
-                                            <span
-                                              style={{
-                                                fontSize: "0.7rem",
-                                                opacity: 0.6,
-                                                marginLeft: "0.2rem",
-                                              }}
-                                            >
-                                              (単{t.investment} / 複
-                                              {t.investment})
-                                            </span>
-                                          )}
-                                        </td>
-                                        <td>{t.payout.toLocaleString()}円</td>
-                                        <td
-                                          style={{
-                                            fontWeight: "bold",
-                                            color:
-                                              t.payout > 0
-                                                ? "var(--color-emerald)"
-                                                : actualCost > 0 &&
-                                                    t.payout === 0
-                                                  ? "var(--color-rose)"
-                                                  : "var(--text-secondary)",
-                                          }}
-                                        >
-                                          {t.payout > 0
-                                            ? "的中 🎯"
-                                            : actualCost > 0 && t.payout === 0
-                                              ? "不的中 💸"
-                                              : "返還/未確定"}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-
-                          {/* Notes */}
-                          {memo.memoText && (
-                            <div className={styles.memoTextBox}>
-                              <div className={styles.memoTextTitle}>
-                                考察・メモ
-                              </div>
-                              <div className={styles.memoTextContent}>
-                                {memo.memoText}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Footer details */}
-                          <div className={styles.detailFooter}>
-                            <div className={styles.detailStats}>
-                              <span>
-                                総投資: {totalInvest.toLocaleString()}円
-                              </span>
-                              <span>総払戻: {totalPay.toLocaleString()}円</span>
-                            </div>
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "0.5rem",
-                              }}
-                            >
-                              <button
-                                type="button"
-                                className={styles.deleteBtn}
-                                style={{
-                                  backgroundColor: "rgba(59, 130, 246, 0.15)",
-                                  color: "var(--color-blue)",
-                                }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleEdit(memo);
-                                }}
-                              >
-                                編集
-                              </button>
-                              <button
-                                className={styles.deleteBtn}
-                                onClick={(e) => handleDelete(memo.id!, e)}
-                              >
-                                削除
-                              </button>
                             </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
+                        )}
+                      </div>
+                    );
+                  })
               )}
             </div>
           </div>
