@@ -778,12 +778,10 @@ export default function Home() {
 
     let finalResult: "hit" | "miss" | "pending" = "pending";
     if (totalInvest > 0) {
-      if (totalPay > totalInvest) {
+      if (totalPay > 0) {
         finalResult = "hit";
-      } else if (totalPay === 0) {
-        finalResult = "miss";
       } else {
-        finalResult = totalPay >= totalInvest ? "hit" : "miss";
+        finalResult = "miss";
       }
     }
 
@@ -1017,8 +1015,21 @@ export default function Home() {
             </h2>
 
             {/* Smart URL Fetch Input */}
-            <div className={styles.fetchBox}>
-              <div className={styles.fetchText}>
+            <div
+              className={styles.fetchBox}
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "0.5rem",
+                alignItems: "center",
+              }}
+            >
+              <div
+                className={styles.fetchText}
+                style={{
+                  flex: "1 1 180px",
+                }}
+              >
                 <strong>ネット競馬等のURL・IDから自動入力</strong>
                 <div
                   style={{
@@ -1034,15 +1045,20 @@ export default function Home() {
                 style={{
                   display: "flex",
                   gap: "0.25rem",
+                  flex: "1 1 150px",
                   width: "100%",
-                  maxWidth: "160px",
                 }}
               >
                 <input
                   type="text"
                   className="input-control"
                   placeholder="URLまたはレースID"
-                  style={{ padding: "0.4rem", fontSize: "0.75rem" }}
+                  style={{
+                    padding: "0.4rem",
+                    fontSize: "0.75rem",
+                    width: "100%",
+                    flexGrow: 1,
+                  }}
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
                 />
@@ -1053,6 +1069,7 @@ export default function Home() {
                     padding: "0.4rem 0.6rem",
                     fontSize: "0.75rem",
                     borderRadius: "8px",
+                    whiteSpace: "nowrap",
                   }}
                   onClick={handleFetchRaceInfo}
                   disabled={isFetching}
@@ -1787,15 +1804,7 @@ export default function Home() {
 
             <div className={styles.scrollArea}>
               {viewMode === "calendar" && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    marginBottom: "1.25rem",
-                    borderBottom: "1px solid var(--border-color)",
-                    paddingBottom: "1.25rem",
-                  }}
-                >
+                <div className={styles.calendarContainer}>
                   {/* Calendar Navigation */}
                   <div
                     style={{
@@ -1857,9 +1866,8 @@ export default function Home() {
 
                   {/* Day-of-week headers */}
                   <div
+                    className={styles.calendarGrid}
                     style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(7, 1fr)",
                       textAlign: "center",
                       fontSize: "0.7rem",
                       fontWeight: "600",
@@ -1887,13 +1895,7 @@ export default function Home() {
                   </div>
 
                   {/* Days grid */}
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(7, 1fr)",
-                      gap: "4px",
-                    }}
-                  >
+                  <div className={styles.calendarGrid}>
                     {getCalendarDays(
                       calendarDate.getFullYear(),
                       calendarDate.getMonth(),
@@ -1943,8 +1945,8 @@ export default function Home() {
                               }
                             }
                           }}
+                          className={styles.calendarCell}
                           style={{
-                            minHeight: "55px",
                             background: isSelected
                               ? "rgba(59, 130, 246, 0.15)"
                               : day.isCurrentMonth
@@ -1955,20 +1957,13 @@ export default function Home() {
                               : isToday
                                 ? "1px solid var(--color-gold)"
                                 : "1px solid var(--border-color)",
-                            borderRadius: "6px",
-                            padding: "4px",
-                            display: "flex",
-                            flexDirection: "column",
-                            justifyContent: "space-between",
                             cursor: hasRecords ? "pointer" : "default",
                             opacity: day.isCurrentMonth ? 1 : 0.4,
-                            transition: "all 0.2s ease",
                           }}
                         >
                           <div
+                            className={styles.calendarDayNum}
                             style={{
-                              fontSize: "0.75rem",
-                              fontWeight: "700",
                               color: isToday
                                 ? "var(--color-gold)"
                                 : "var(--text-primary)",
@@ -1989,13 +1984,8 @@ export default function Home() {
 
                           {hasRecords && (
                             <div
+                              className={styles.calendarIncome}
                               style={{
-                                fontSize: "0.65rem",
-                                fontWeight: "800",
-                                textAlign: "right",
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
                                 color:
                                   dayDiff > 0
                                     ? "var(--color-emerald)"
@@ -2358,87 +2348,109 @@ export default function Home() {
                                 >
                                   購入した馬券
                                 </div>
-                                <table className={styles.logTicketsTable}>
-                                  <thead>
-                                    <tr>
-                                      <th>式別</th>
-                                      <th>買い目</th>
-                                      <th>投資額</th>
-                                      <th>払戻額</th>
-                                      <th>結果</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {memo.tickets.map((t, idx) => {
-                                      const actualCost = getTicketCost(t);
-                                      const expanded = expandTicketSelection(
-                                        t.type,
-                                        t.selection,
-                                      );
+                                <div
+                                  style={{
+                                    overflowX: "auto",
+                                    width: "100%",
+                                    WebkitOverflowScrolling: "touch",
+                                    borderRadius: "8px",
+                                    border: "1px solid var(--border-color)",
+                                    marginTop: "0.5rem",
+                                  }}
+                                >
+                                  <table
+                                    className={styles.logTicketsTable}
+                                    style={{
+                                      minWidth: "430px",
+                                      width: "100%",
+                                      marginTop: 0,
+                                      border: "none",
+                                    }}
+                                  >
+                                    <thead>
+                                      <tr>
+                                        <th>式別</th>
+                                        <th>買い目</th>
+                                        <th>投資額</th>
+                                        <th>払戻額</th>
+                                        <th>結果</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {memo.tickets.map((t, idx) => {
+                                        const actualCost = getTicketCost(t);
+                                        const expanded = expandTicketSelection(
+                                          t.type,
+                                          t.selection,
+                                        );
 
-                                      return (
-                                        <tr key={idx}>
-                                          <td>{t.type}</td>
-                                          <td
-                                            style={{
-                                              fontFamily:
-                                                "var(--font-outfit), sans-serif",
-                                              fontWeight: "600",
-                                            }}
-                                          >
-                                            {t.selection}
-                                            {expanded.length > 1 && (
-                                              <span
-                                                style={{
-                                                  fontSize: "0.7rem",
-                                                  color: "var(--color-blue)",
-                                                  fontWeight: "bold",
-                                                  marginLeft: "0.25rem",
-                                                }}
-                                              >
-                                                ({expanded.length}点)
-                                              </span>
-                                            )}
-                                          </td>
-                                          <td>
-                                            {actualCost.toLocaleString()}円
-                                            {t.type === "応援馬券" && (
-                                              <span
-                                                style={{
-                                                  fontSize: "0.7rem",
-                                                  opacity: 0.6,
-                                                  marginLeft: "0.2rem",
-                                                }}
-                                              >
-                                                (単{t.investment} / 複
-                                                {t.investment})
-                                              </span>
-                                            )}
-                                          </td>
-                                          <td>{t.payout.toLocaleString()}円</td>
-                                          <td
-                                            style={{
-                                              fontWeight: "bold",
-                                              color:
-                                                t.payout > 0
-                                                  ? "var(--color-emerald)"
-                                                  : actualCost > 0 &&
-                                                      t.payout === 0
-                                                    ? "var(--color-rose)"
-                                                    : "var(--text-secondary)",
-                                            }}
-                                          >
-                                            {t.payout > 0
-                                              ? "的中 🎯"
-                                              : actualCost > 0 && t.payout === 0
-                                                ? "不的中 💸"
-                                                : "返還/未確定"}
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
+                                        return (
+                                          <tr key={idx}>
+                                            <td>{t.type}</td>
+                                            <td
+                                              style={{
+                                                fontFamily:
+                                                  "var(--font-outfit), sans-serif",
+                                                fontWeight: "600",
+                                              }}
+                                            >
+                                              {t.selection}
+                                              {expanded.length > 1 && (
+                                                <span
+                                                  style={{
+                                                    fontSize: "0.7rem",
+                                                    color: "var(--color-blue)",
+                                                    fontWeight: "bold",
+                                                    marginLeft: "0.25rem",
+                                                  }}
+                                                >
+                                                  ({expanded.length}点)
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td>
+                                              {actualCost.toLocaleString()}円
+                                              {t.type === "応援馬券" && (
+                                                <span
+                                                  style={{
+                                                    fontSize: "0.7rem",
+                                                    opacity: 0.6,
+                                                    marginLeft: "0.2rem",
+                                                  }}
+                                                >
+                                                  (単{t.investment} / 複
+                                                  {t.investment})
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td>
+                                              {t.payout.toLocaleString()}円
+                                            </td>
+                                            <td
+                                              style={{
+                                                fontWeight: "bold",
+                                                color:
+                                                  t.payout > 0
+                                                    ? "var(--color-emerald)"
+                                                    : actualCost > 0 &&
+                                                        t.payout === 0
+                                                      ? "var(--color-rose)"
+                                                      : "var(--text-secondary)",
+                                              }}
+                                            >
+                                              {t.payout > 0
+                                                ? "的中 🎯"
+                                                : actualCost > 0 &&
+                                                    t.payout === 0
+                                                  ? "不的中 💸"
+                                                  : "返還/未確定"}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
                               </div>
                             )}
 
