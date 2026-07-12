@@ -312,6 +312,17 @@ export default function Home() {
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
 
+  // Active GUI index and select states for wagers tickets
+  const [activeTicketGuiIndex, setActiveTicketGuiIndex] = useState<
+    number | null
+  >(null);
+  const [guiBetType, setGuiBetType] = useState<"normal" | "nagashi" | "box">(
+    "normal",
+  );
+  const [guiSelection1, setGuiSelection1] = useState<number[]>([]);
+  const [guiSelection2, setGuiSelection2] = useState<number[]>([]);
+  const [guiSelection3, setGuiSelection3] = useState<number[]>([]);
+
   // Get calendar grid days (including padding from prev/next month)
   const getCalendarDays = (year: number, month: number) => {
     const firstDay = new Date(year, month, 1);
@@ -780,6 +791,98 @@ export default function Home() {
     }
   };
 
+  // Helper: Auto-calculate and update selection string in a specific ticket based on GUI selections
+  const updateTicketSelectionFromGui = (
+    ticketIndex: number,
+    ticketType: string,
+    betType: "normal" | "nagashi" | "box",
+    sel1: number[],
+    sel2: number[],
+    sel3: number[],
+  ) => {
+    let resultStr = "";
+    const s1 = [...sel1].sort((a, b) => a - b).join(",");
+    const s2 = [...sel2].sort((a, b) => a - b).join(",");
+    const s3 = [...sel3].sort((a, b) => a - b).join(",");
+
+    if (betType === "box") {
+      if (s1) {
+        resultStr = `BOX ${s1}`;
+      }
+    } else if (betType === "nagashi") {
+      if (s1 && s2) {
+        resultStr = `${s1} - ${s2}`;
+      } else {
+        resultStr = s1 || s2;
+      }
+    } else {
+      const parts = [];
+      if (s1) parts.push(s1);
+      if (s2) parts.push(s2);
+      if (s3) parts.push(s3);
+
+      const targetSizeMap: Record<string, number> = {
+        単勝: 1,
+        複勝: 1,
+        応援馬券: 1,
+        枠連: 2,
+        馬連: 2,
+        馬単: 2,
+        ワイド: 2,
+        "3連複": 3,
+        "3連単": 3,
+      };
+      const requiredSections = targetSizeMap[ticketType] || 1;
+
+      if (parts.length > 0) {
+        resultStr = parts.slice(0, requiredSections).join(" - ");
+      }
+    }
+
+    handleTicketChange(ticketIndex, "selection", resultStr);
+  };
+
+  // Helper: Reverse-parse a wagers ticket selection string to populate the GUI button highlights
+  const parseSelectionToGui = (ticketType: string, selection: string) => {
+    const clean = selection.trim().toUpperCase();
+
+    let betType: "normal" | "nagashi" | "box" = "normal";
+    let sel1: number[] = [];
+    let sel2: number[] = [];
+    let sel3: number[] = [];
+
+    const parseNumbers = (str: string) => {
+      return str
+        .split(/[,、\s]+/)
+        .map(Number)
+        .filter((n) => !isNaN(n) && n > 0);
+    };
+
+    if (clean.includes("BOX") || clean.includes("ボックス")) {
+      betType = "box";
+      const raw = clean.replace(/BOX|ボックス/gi, "");
+      sel1 = parseNumbers(raw);
+    } else {
+      const sections = clean.split(/[-ー=➔→⇒★]+/g);
+      if (sections.length > 1) {
+        sel1 = parseNumbers(sections[0]);
+        if (sections[1]) sel2 = parseNumbers(sections[1]);
+        if (sections[2]) sel3 = parseNumbers(sections[2]);
+
+        if (sections.length === 2) {
+          betType = "nagashi";
+        }
+      } else if (clean) {
+        sel1 = parseNumbers(clean);
+      }
+    }
+
+    setGuiBetType(betType);
+    setGuiSelection1(sel1);
+    setGuiSelection2(sel2);
+    setGuiSelection3(sel3);
+  };
+
   // Load saved memo into form for editing
   const handleEdit = (memo: MemoData) => {
     setPreEditViewMode(viewMode);
@@ -806,7 +909,10 @@ export default function Home() {
     setScrapedResults(memo.resultList || []);
     setNetkeibaUrl(memo.netkeibaUrl || "");
 
-    if (memo.resultList && memo.resultList.length > 0) {
+    if (memo.fetchedHorses && memo.fetchedHorses.length > 0) {
+      setFetchedHorses(memo.fetchedHorses);
+    } else if (memo.resultList && memo.resultList.length > 0) {
+      // Fallback for legacy records: restore from resultList (typically 3 finishing horses)
       setFetchedHorses(
         memo.resultList.map((r) => ({
           waku: 1,
@@ -879,6 +985,7 @@ export default function Home() {
       result: finalResult,
       resultList: scrapedResults,
       netkeibaUrl: netkeibaUrl || undefined,
+      fetchedHorses: fetchedHorses.length > 0 ? fetchedHorses : undefined,
       tickets: tickets.map((t) => ({
         type: t.type,
         selection: t.selection,
@@ -1580,142 +1687,577 @@ export default function Home() {
                       expanded.length > 0 && ticket.selection.trim().length > 0;
 
                     return (
-                      <div key={index} className={styles.ticketRow}>
-                        <select
-                          className="input-control"
-                          style={{ padding: "0.45rem" }}
-                          value={ticket.type}
-                          onChange={(e) =>
-                            handleTicketChange(index, "type", e.target.value)
-                          }
-                        >
-                          {[
-                            "単勝",
-                            "複勝",
-                            "応援馬券",
-                            "枠連",
-                            "馬連",
-                            "馬単",
-                            "ワイド",
-                            "3連複",
-                            "3連単",
-                          ].map((t) => (
-                            <option key={t} value={t}>
-                              {t}
-                            </option>
-                          ))}
-                        </select>
-
-                        <div
-                          style={{
-                            position: "relative",
-                            display: "flex",
-                            alignItems: "center",
-                          }}
-                        >
-                          <input
-                            type="text"
+                      <div
+                        key={index}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0.25rem",
+                          borderBottom: "1px solid var(--border-color)",
+                          paddingBottom: "0.75rem",
+                          marginBottom: "0.5rem",
+                        }}
+                      >
+                        <div className={styles.ticketRow}>
+                          <select
                             className="input-control"
-                            style={{ padding: "0.45rem", width: "100%" }}
-                            placeholder="買い目 (例: BOX 3,5,6 / 1-2,3)"
-                            value={ticket.selection}
+                            style={{ padding: "0.45rem" }}
+                            value={ticket.type}
                             onChange={(e) =>
-                              handleTicketChange(
-                                index,
-                                "selection",
-                                e.target.value,
-                              )
+                              handleTicketChange(index, "type", e.target.value)
                             }
-                            required
-                          />
-                          {isCombo && (
-                            <span
-                              style={{
-                                position: "absolute",
-                                right: "5px",
-                                background: "rgba(59, 130, 246, 0.2)",
-                                color: "var(--color-blue)",
-                                fontSize: "0.65rem",
-                                padding: "0.1rem 0.3rem",
-                                borderRadius: "4px",
-                                fontWeight: "bold",
-                              }}
-                            >
-                              {expanded.length}点
-                            </span>
-                          )}
-                        </div>
+                          >
+                            {[
+                              "単勝",
+                              "複勝",
+                              "応援馬券",
+                              "枠連",
+                              "馬連",
+                              "馬単",
+                              "ワイド",
+                              "3連複",
+                              "3連単",
+                            ].map((t) => (
+                              <option key={t} value={t}>
+                                {t}
+                              </option>
+                            ))}
+                          </select>
 
-                        <div
-                          style={{
-                            position: "relative",
-                            display: "flex",
-                            alignItems: "center",
-                          }}
-                        >
+                          <div
+                            style={{
+                              position: "relative",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.25rem",
+                            }}
+                          >
+                            <div style={{ position: "relative", flex: 1 }}>
+                              <input
+                                type="text"
+                                className="input-control"
+                                style={{ padding: "0.45rem", width: "100%" }}
+                                placeholder="買い目 (例: BOX 3,5,6)"
+                                value={ticket.selection}
+                                onChange={(e) =>
+                                  handleTicketChange(
+                                    index,
+                                    "selection",
+                                    e.target.value,
+                                  )
+                                }
+                                required
+                              />
+                              {isCombo && (
+                                <span
+                                  style={{
+                                    position: "absolute",
+                                    right: "5px",
+                                    top: "50%",
+                                    transform: "translateY(-50%)",
+                                    background: "rgba(59, 130, 246, 0.2)",
+                                    color: "var(--color-blue)",
+                                    fontSize: "0.65rem",
+                                    padding: "0.1rem 0.3rem",
+                                    borderRadius: "4px",
+                                    fontWeight: "bold",
+                                  }}
+                                >
+                                  {expanded.length}点
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (activeTicketGuiIndex === index) {
+                                  setActiveTicketGuiIndex(null);
+                                } else {
+                                  setActiveTicketGuiIndex(index);
+                                  parseSelectionToGui(
+                                    ticket.type,
+                                    ticket.selection,
+                                  );
+                                }
+                              }}
+                              className="btn"
+                              style={{
+                                padding: "0.45rem",
+                                fontSize: "0.85rem",
+                                minWidth: "36px",
+                                height: "36px",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                background:
+                                  activeTicketGuiIndex === index
+                                    ? "var(--grad-primary)"
+                                    : "var(--bg-tertiary)",
+                                color:
+                                  activeTicketGuiIndex === index
+                                    ? "#fff"
+                                    : "var(--text-primary)",
+                                border: "1px solid var(--border-color)",
+                                borderRadius: "6px",
+                                cursor: "pointer",
+                              }}
+                              title="GUIでマーク入力"
+                            >
+                              🎯
+                            </button>
+                          </div>
+
+                          <div
+                            style={{
+                              position: "relative",
+                              display: "flex",
+                              alignItems: "center",
+                            }}
+                          >
+                            <input
+                              type="number"
+                              className="input-control"
+                              style={{ padding: "0.45rem", width: "100%" }}
+                              placeholder="投資額"
+                              value={ticket.investment || ""}
+                              onChange={(e) =>
+                                handleTicketChange(
+                                  index,
+                                  "investment",
+                                  e.target.value,
+                                )
+                              }
+                              required
+                            />
+                            {ticket.type === "応援馬券" && (
+                              <span
+                                style={{
+                                  position: "absolute",
+                                  right: "5px",
+                                  background: "rgba(239, 68, 68, 0.2)",
+                                  color: "var(--color-rose)",
+                                  fontSize: "0.6rem",
+                                  padding: "0.1rem 0.25rem",
+                                  borderRadius: "4px",
+                                  fontWeight: "bold",
+                                }}
+                              >
+                                ×2
+                              </span>
+                            )}
+                          </div>
+
                           <input
                             type="number"
                             className="input-control"
-                            style={{ padding: "0.45rem", width: "100%" }}
-                            placeholder="投資額"
-                            value={ticket.investment || ""}
+                            style={{ padding: "0.45rem" }}
+                            placeholder="払戻額"
+                            value={ticket.payout || ""}
                             onChange={(e) =>
                               handleTicketChange(
                                 index,
-                                "investment",
+                                "payout",
                                 e.target.value,
                               )
                             }
-                            required
                           />
-                          {ticket.type === "応援馬券" && (
-                            <span
-                              style={{
-                                position: "absolute",
-                                right: "5px",
-                                background: "rgba(239, 68, 68, 0.2)",
-                                color: "var(--color-rose)",
-                                fontSize: "0.6rem",
-                                padding: "0.1rem 0.25rem",
-                                borderRadius: "4px",
-                                fontWeight: "bold",
-                              }}
+
+                          <button
+                            type="button"
+                            className={styles.removeTicketBtn}
+                            onClick={() => handleRemoveTicket(index)}
+                            disabled={tickets.length === 1}
+                            title="この馬券を削除"
+                          >
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
                             >
-                              ×2
-                            </span>
-                          )}
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            </svg>
+                          </button>
                         </div>
 
-                        <input
-                          type="number"
-                          className="input-control"
-                          style={{ padding: "0.45rem" }}
-                          placeholder="払戻額"
-                          value={ticket.payout || ""}
-                          onChange={(e) =>
-                            handleTicketChange(index, "payout", e.target.value)
-                          }
-                        />
+                        {/* GUI markup */}
+                        {activeTicketGuiIndex === index &&
+                          (() => {
+                            // Determine columns to display
+                            let columns: string[] = [];
+                            if (guiBetType === "box") {
+                              columns = ["選択"];
+                            } else if (guiBetType === "nagashi") {
+                              columns = ["軸", "相手"];
+                            } else {
+                              // normal
+                              if (
+                                ["単勝", "複勝", "応援馬券"].includes(
+                                  ticket.type,
+                                )
+                              ) {
+                                columns = ["選択"];
+                              } else if (
+                                ["枠連", "馬連", "馬単", "ワイド"].includes(
+                                  ticket.type,
+                                )
+                              ) {
+                                columns = ["1頭目", "2頭目"];
+                              } else if (
+                                ["3連複", "3連単"].includes(ticket.type)
+                              ) {
+                                columns = ["1着", "2着", "3着"];
+                              } else {
+                                columns = ["選択"];
+                              }
+                            }
 
-                        <button
-                          type="button"
-                          className={styles.removeTicketBtn}
-                          onClick={() => handleRemoveTicket(index)}
-                          disabled={tickets.length === 1}
-                          title="この馬券を削除"
-                        >
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                          </svg>
-                        </button>
+                            const totalHorses =
+                              fetchedHorses.length > 0
+                                ? fetchedHorses.length
+                                : 18;
+                            const horseList = Array.from(
+                              { length: totalHorses },
+                              (_, i) => i + 1,
+                            );
+
+                            // Helper: Render individual tap button (36px wide/tall) inside the JRA markcard table row
+                            const renderRowButton = (
+                              num: number,
+                              colType: 1 | 2 | 3,
+                            ) => {
+                              let selectedList = guiSelection1;
+                              let setSelectedList = setGuiSelection1;
+                              if (colType === 2) {
+                                selectedList = guiSelection2;
+                                setSelectedList = setGuiSelection2;
+                              } else if (colType === 3) {
+                                selectedList = guiSelection3;
+                                setSelectedList = setGuiSelection3;
+                              }
+
+                              const isSelected = selectedList.includes(num);
+
+                              const handleToggle = () => {
+                                let updated: number[];
+                                if (selectedList.includes(num)) {
+                                  updated = selectedList.filter(
+                                    (x) => x !== num,
+                                  );
+                                } else {
+                                  updated = [...selectedList, num];
+                                }
+                                setSelectedList(updated);
+
+                                const s1 =
+                                  colType === 1 ? updated : guiSelection1;
+                                const s2 =
+                                  colType === 2 ? updated : guiSelection2;
+                                const s3 =
+                                  colType === 3 ? updated : guiSelection3;
+                                updateTicketSelectionFromGui(
+                                  index,
+                                  ticket.type,
+                                  guiBetType,
+                                  s1,
+                                  s2,
+                                  s3,
+                                );
+                              };
+
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={handleToggle}
+                                  className="btn"
+                                  style={{
+                                    width: "36px",
+                                    height: "36px",
+                                    padding: 0,
+                                    fontSize: "0.75rem",
+                                    borderRadius: "50%",
+                                    background: isSelected
+                                      ? "var(--grad-primary)"
+                                      : "rgba(255, 255, 255, 0.03)",
+                                    color: isSelected
+                                      ? "#fff"
+                                      : "var(--text-secondary)",
+                                    border: isSelected
+                                      ? "none"
+                                      : "1px solid var(--border-color)",
+                                    boxShadow: isSelected
+                                      ? "0 2px 6px rgba(16,185,129,0.4)"
+                                      : "none",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontWeight: "bold",
+                                    cursor: "pointer",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {isSelected ? "✓" : num}
+                                </button>
+                              );
+                            };
+
+                            return (
+                              <div
+                                style={{
+                                  background: "rgba(17, 24, 39, 0.6)",
+                                  border: "1px solid var(--border-color)",
+                                  borderRadius: "10px",
+                                  padding: "0.75rem",
+                                  marginTop: "0.5rem",
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: "0.75rem",
+                                }}
+                              >
+                                {!["単勝", "複勝", "応援馬券"].includes(
+                                  ticket.type,
+                                ) && (
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      gap: "0.35rem",
+                                      background: "rgba(0,0,0,0.2)",
+                                      padding: "0.25rem",
+                                      borderRadius: "6px",
+                                    }}
+                                  >
+                                    {[
+                                      {
+                                        key: "normal",
+                                        label: "通常/フォーメーション",
+                                      },
+                                      { key: "nagashi", label: "軸流し" },
+                                      { key: "box", label: "BOX" },
+                                    ].map((tab) => (
+                                      <button
+                                        key={tab.key}
+                                        type="button"
+                                        onClick={() => {
+                                          setGuiBetType(tab.key as any);
+                                          updateTicketSelectionFromGui(
+                                            index,
+                                            ticket.type,
+                                            tab.key as any,
+                                            guiSelection1,
+                                            guiSelection2,
+                                            guiSelection3,
+                                          );
+                                        }}
+                                        className="btn"
+                                        style={{
+                                          flex: 1,
+                                          padding: "0.35rem",
+                                          fontSize: "0.7rem",
+                                          borderRadius: "4px",
+                                          background:
+                                            guiBetType === tab.key
+                                              ? "var(--grad-primary)"
+                                              : "transparent",
+                                          color:
+                                            guiBetType === tab.key
+                                              ? "#fff"
+                                              : "var(--text-secondary)",
+                                          boxShadow: "none",
+                                          border: "none",
+                                          cursor: "pointer",
+                                        }}
+                                      >
+                                        {tab.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* JRA-style Markcard selector table */}
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "0.25rem",
+                                    maxHeight: "350px",
+                                    overflowY: "auto",
+                                    background: "rgba(0, 0, 0, 0.2)",
+                                    borderRadius: "8px",
+                                    padding: "0.4rem",
+                                  }}
+                                >
+                                  {/* Header */}
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      padding: "0.3rem 0.5rem",
+                                      borderBottom:
+                                        "1px solid rgba(255, 255, 255, 0.08)",
+                                      fontSize: "0.7rem",
+                                      fontWeight: "bold",
+                                      color: "var(--text-secondary)",
+                                    }}
+                                  >
+                                    <div style={{ flex: 1 }}>馬名/予想印</div>
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        gap: "0.5rem",
+                                        justifyContent: "flex-end",
+                                      }}
+                                    >
+                                      {columns.map((col, idx) => (
+                                        <div
+                                          key={idx}
+                                          style={{
+                                            width: "36px",
+                                            textAlign: "center",
+                                          }}
+                                        >
+                                          {col}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  {/* Horse Rows */}
+                                  {horseList.map((num) => {
+                                    const scrapedHorse = fetchedHorses.find(
+                                      (h) => h.umaban === num,
+                                    );
+                                    const horseName = scrapedHorse
+                                      ? scrapedHorse.horseName
+                                      : `馬番 ${num}`;
+                                    const waku = scrapedHorse
+                                      ? scrapedHorse.waku
+                                      : num <= 8
+                                        ? num
+                                        : Math.min(8, Math.ceil(num / 2));
+                                    const wakuStyle = WAKU_COLORS[waku] || {
+                                      bg: "var(--bg-tertiary)",
+                                      text: "var(--text-primary)",
+                                    };
+
+                                    const myMark = getHorseMark(
+                                      num.toString(),
+                                      scrapedHorse
+                                        ? scrapedHorse.horseName
+                                        : "",
+                                      { honmei, taiko, anago, renge },
+                                    );
+
+                                    return (
+                                      <div
+                                        key={num}
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          padding: "0.4rem 0.5rem",
+                                          borderBottom:
+                                            "1px solid rgba(255, 255, 255, 0.03)",
+                                          gap: "0.5rem",
+                                        }}
+                                      >
+                                        {/* Info */}
+                                        <div
+                                          style={{
+                                            flex: 1,
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: "0.4rem",
+                                            minWidth: 0,
+                                          }}
+                                        >
+                                          <span
+                                            style={{
+                                              display: "inline-flex",
+                                              alignItems: "center",
+                                              justifyContent: "center",
+                                              width: "20px",
+                                              height: "20px",
+                                              borderRadius: "4px",
+                                              fontSize: "0.7rem",
+                                              fontWeight: "bold",
+                                              background: wakuStyle.bg,
+                                              color: wakuStyle.text,
+                                              border: `1px solid ${wakuStyle.border || "transparent"}`,
+                                              flexShrink: 0,
+                                            }}
+                                          >
+                                            {num}
+                                          </span>
+
+                                          <span
+                                            style={{
+                                              fontSize: "0.8rem",
+                                              fontWeight: "600",
+                                              whiteSpace: "nowrap",
+                                              overflow: "hidden",
+                                              textOverflow: "ellipsis",
+                                              color: scrapedHorse
+                                                ? "var(--text-primary)"
+                                                : "var(--text-muted)",
+                                            }}
+                                          >
+                                            {horseName}
+                                          </span>
+
+                                          {myMark && (
+                                            <span
+                                              className={`mark-badge ${myMark.className} active`}
+                                              style={{
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                width: "16px",
+                                                height: "16px",
+                                                borderRadius: "50%",
+                                                fontSize: "0.6rem",
+                                                fontWeight: "bold",
+                                                flexShrink: 0,
+                                              }}
+                                            >
+                                              {myMark.symbol}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* Select Columns */}
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            gap: "0.5rem",
+                                            justifyContent: "flex-end",
+                                            flexShrink: 0,
+                                          }}
+                                        >
+                                          {columns.length === 1 &&
+                                            renderRowButton(num, 1)}
+                                          {columns.length === 2 && (
+                                            <>
+                                              {renderRowButton(num, 1)}
+                                              {renderRowButton(num, 2)}
+                                            </>
+                                          )}
+                                          {columns.length === 3 && (
+                                            <>
+                                              {renderRowButton(num, 1)}
+                                              {renderRowButton(num, 2)}
+                                              {renderRowButton(num, 3)}
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })()}
                       </div>
                     );
                   })}

@@ -18,6 +18,13 @@ export interface RaceResult {
   jockey?: string;
 }
 
+export interface ScrapedHorse {
+  waku: number;
+  umaban: number;
+  horseName: string;
+  jockey?: string;
+}
+
 export interface MemoData {
   id?: string;
   date: string;
@@ -34,6 +41,7 @@ export interface MemoData {
   result: "hit" | "miss" | "pending";
   resultList?: RaceResult[]; // Local variable mapped to resultList JSON in DB
   netkeibaUrl?: string; // URL to netkeiba race page
+  fetchedHorses?: ScrapedHorse[]; // Serialized JSON of all scraped runners in DB
   tickets: TicketData[];
 }
 
@@ -58,6 +66,13 @@ export async function getMemos(): Promise<MemoData[]> {
         console.warn("Failed to parse resultList JSON:", e);
       }
 
+      let parsedHorses: ScrapedHorse[] = [];
+      try {
+        parsedHorses = m.fetchedHorses ? JSON.parse(m.fetchedHorses) : [];
+      } catch (e) {
+        console.warn("Failed to parse fetchedHorses JSON:", e);
+      }
+
       return {
         id: m.id,
         date: m.date,
@@ -74,6 +89,7 @@ export async function getMemos(): Promise<MemoData[]> {
         result: m.result as "hit" | "miss" | "pending",
         resultList: parsedResults,
         netkeibaUrl: m.netkeibaUrl || undefined,
+        fetchedHorses: parsedHorses,
         tickets: m.tickets.map((t) => ({
           id: t.id,
           type: t.type,
@@ -97,6 +113,10 @@ export async function saveMemo(data: Omit<MemoData, "id"> & { id?: string }) {
       ? JSON.stringify(data.resultList)
       : "[]";
 
+    const serializedHorses = data.fetchedHorses
+      ? JSON.stringify(data.fetchedHorses)
+      : "[]";
+
     const dbData = {
       date: data.date,
       track: data.track,
@@ -110,6 +130,7 @@ export async function saveMemo(data: Omit<MemoData, "id"> & { id?: string }) {
       result: data.result,
       resultList: serializedResults,
       netkeibaUrl: data.netkeibaUrl || null,
+      fetchedHorses: serializedHorses,
     };
 
     if (data.id) {

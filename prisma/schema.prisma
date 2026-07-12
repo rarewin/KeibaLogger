@@ -25,6 +25,7 @@ model Memo {
   result     String   // "hit" | "miss" | "pending"
   resultList String?  // Serialized JSON of top 5 finishing results
   netkeibaUrl String? // netkeiba race URL or ID (optional)
+  fetchedHorses String? // Serialized JSON of all scraped runners in the race
   createdAt  DateTime @default(now())
   
   tickets    Ticket[]
