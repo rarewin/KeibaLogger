@@ -1915,8 +1915,10 @@ export default function Home() {
                               }
                             }
 
-                            const totalHorses =
-                              fetchedHorses.length > 0
+                            const isWakuRen = ticket.type === "枠連";
+                            const totalHorses = isWakuRen
+                              ? 8
+                              : fetchedHorses.length > 0
                                 ? fetchedHorses.length
                                 : 18;
                             const horseList = Array.from(
@@ -2129,26 +2131,101 @@ export default function Home() {
                                     const scrapedHorse = fetchedHorses.find(
                                       (h) => h.umaban === num,
                                     );
-                                    const horseName = scrapedHorse
-                                      ? scrapedHorse.horseName
-                                      : `馬番 ${num}`;
-                                    const waku = scrapedHorse
-                                      ? scrapedHorse.waku
-                                      : num <= 8
-                                        ? num
-                                        : Math.min(8, Math.ceil(num / 2));
-                                    const wakuStyle = WAKU_COLORS[waku] || {
+                                    let horseName = "";
+                                    let waku = num;
+                                    let wakuStyle = WAKU_COLORS[waku] || {
                                       bg: "var(--bg-tertiary)",
                                       text: "var(--text-primary)",
                                     };
+                                    const myMarks: React.ReactNode[] = [];
 
-                                    const myMark = getHorseMark(
-                                      num.toString(),
-                                      scrapedHorse
+                                    if (isWakuRen) {
+                                      const horsesInWaku = fetchedHorses.filter(
+                                        (h) => h.waku === num,
+                                      );
+                                      if (horsesInWaku.length > 0) {
+                                        horseName = horsesInWaku
+                                          .map(
+                                            (h) =>
+                                              `[${h.umaban}] ${h.horseName}`,
+                                          )
+                                          .join(", ");
+                                      } else {
+                                        horseName = `${num}枠`;
+                                      }
+
+                                      for (const h of horsesInWaku) {
+                                        const mark = getHorseMark(
+                                          h.umaban.toString(),
+                                          h.horseName,
+                                          { honmei, taiko, anago, renge },
+                                        );
+                                        if (mark) {
+                                          myMarks.push(
+                                            <span
+                                              key={h.umaban}
+                                              className={`mark-badge ${mark.className} active`}
+                                              style={{
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                width: "16px",
+                                                height: "16px",
+                                                borderRadius: "50%",
+                                                fontSize: "0.6rem",
+                                                fontWeight: "bold",
+                                                flexShrink: 0,
+                                              }}
+                                              title={`${h.horseName} の印`}
+                                            >
+                                              {mark.symbol}
+                                            </span>,
+                                          );
+                                        }
+                                      }
+                                    } else {
+                                      horseName = scrapedHorse
                                         ? scrapedHorse.horseName
-                                        : "",
-                                      { honmei, taiko, anago, renge },
-                                    );
+                                        : `馬番 ${num}`;
+                                      waku = scrapedHorse
+                                        ? scrapedHorse.waku
+                                        : num <= 8
+                                          ? num
+                                          : Math.min(8, Math.ceil(num / 2));
+                                      wakuStyle = WAKU_COLORS[waku] || {
+                                        bg: "var(--bg-tertiary)",
+                                        text: "var(--text-primary)",
+                                      };
+
+                                      const myMark = getHorseMark(
+                                        num.toString(),
+                                        scrapedHorse
+                                          ? scrapedHorse.horseName
+                                          : "",
+                                        { honmei, taiko, anago, renge },
+                                      );
+                                      if (myMark) {
+                                        myMarks.push(
+                                          <span
+                                            key="single"
+                                            className={`mark-badge ${myMark.className} active`}
+                                            style={{
+                                              display: "inline-flex",
+                                              alignItems: "center",
+                                              justifyContent: "center",
+                                              width: "16px",
+                                              height: "16px",
+                                              borderRadius: "50%",
+                                              fontSize: "0.6rem",
+                                              fontWeight: "bold",
+                                              flexShrink: 0,
+                                            }}
+                                          >
+                                            {myMark.symbol}
+                                          </span>,
+                                        );
+                                      }
+                                    }
 
                                     return (
                                       <div
@@ -2198,31 +2275,24 @@ export default function Home() {
                                               whiteSpace: "nowrap",
                                               overflow: "hidden",
                                               textOverflow: "ellipsis",
-                                              color: scrapedHorse
-                                                ? "var(--text-primary)"
-                                                : "var(--text-muted)",
+                                              color:
+                                                isWakuRen || scrapedHorse
+                                                  ? "var(--text-primary)"
+                                                  : "var(--text-muted)",
                                             }}
                                           >
                                             {horseName}
                                           </span>
 
-                                          {myMark && (
-                                            <span
-                                              className={`mark-badge ${myMark.className} active`}
+                                          {myMarks.length > 0 && (
+                                            <div
                                               style={{
-                                                display: "inline-flex",
-                                                alignItems: "center",
-                                                justifyContent: "center",
-                                                width: "16px",
-                                                height: "16px",
-                                                borderRadius: "50%",
-                                                fontSize: "0.6rem",
-                                                fontWeight: "bold",
-                                                flexShrink: 0,
+                                                display: "flex",
+                                                gap: "0.15rem",
                                               }}
                                             >
-                                              {myMark.symbol}
-                                            </span>
+                                              {myMarks}
+                                            </div>
                                           )}
                                         </div>
 
