@@ -306,6 +306,9 @@ export default function Home() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [netkeibaUrl, setNetkeibaUrl] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+  const [preEditViewMode, setPreEditViewMode] = useState<
+    "list" | "calendar" | null
+  >(null);
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
 
@@ -672,7 +675,59 @@ export default function Home() {
     }
   };
 
-  // Assign horse name with horse number and jockey to specific prediction input
+  // Helper: Check if a horse is already selected as a specific prediction mark
+  const isHorseMarked = (
+    horse: ScrapedHorse,
+    markType: "honmei" | "taiko" | "anago" | "renge",
+  ) => {
+    const targetVal = horse.jockey
+      ? `${horse.umaban} ${horse.horseName} (${horse.jockey})`
+      : `${horse.umaban} ${horse.horseName}`;
+
+    let val = "";
+    if (markType === "honmei") val = honmei;
+    else if (markType === "taiko") val = taiko;
+    else if (markType === "anago") val = anago;
+    else if (markType === "renge") val = renge;
+
+    if (!val) return false;
+
+    const tokens = val.split(/[,、]\s*/).map((x) => x.trim());
+    return tokens.includes(targetVal);
+  };
+
+  // Helper: Retrieve a matching prediction mark for a result horse number and name
+  const getHorseMark = (
+    horseNum: string,
+    horseName: string,
+    prediction: { honmei: string; taiko: string; anago: string; renge: string },
+  ) => {
+    const cleanNum = horseNum.trim();
+    const cleanName = horseName.trim();
+
+    const matches = (val: string) => {
+      if (!val) return false;
+      const tokens = val.split(/[,、]\s*/).map((x) => x.trim());
+      return tokens.some((token) => {
+        const parts = token.split(/\s+/);
+        const tokenNum = parts[0];
+        const tokenName = parts[1];
+        return tokenNum === cleanNum || tokenName === cleanName;
+      });
+    };
+
+    if (matches(prediction.honmei))
+      return { symbol: "◎", className: "mark-honmei" };
+    if (matches(prediction.taiko))
+      return { symbol: "◯", className: "mark-taiko" };
+    if (matches(prediction.anago))
+      return { symbol: "▲", className: "mark-anago" };
+    if (matches(prediction.renge))
+      return { symbol: "△", className: "mark-renge" };
+    return null;
+  };
+
+  // Assign horse name with horse number and jockey to specific wagers prediction (supports multiple selections and toggles)
   const handleQuickMark = (
     horse: ScrapedHorse,
     markType: "honmei" | "taiko" | "anago" | "renge",
@@ -680,31 +735,54 @@ export default function Home() {
     const formattedVal = horse.jockey
       ? `${horse.umaban} ${horse.horseName} (${horse.jockey})`
       : `${horse.umaban} ${horse.horseName}`;
-    if (markType === "honmei") {
-      setHonmei(formattedVal);
-      showToast(`◎ (本命) に ${formattedVal} を設定しました`);
-    } else if (markType === "taiko") {
-      setTaiko(formattedVal);
-      showToast(`◯ (対抗) に ${formattedVal} を設定しました`);
-    } else {
-      const currentVal = markType === "anago" ? anago : renge;
-      const setter = markType === "anago" ? setAnago : setRenge;
-      const label = markType === "anago" ? "▲ (単穴)" : "△ (連下)";
 
-      if (!currentVal) {
-        setter(formattedVal);
+    let currentVal = "";
+    let setter: (val: string) => void;
+    let label = "";
+
+    if (markType === "honmei") {
+      currentVal = honmei;
+      setter = setHonmei;
+      label = "◎ (本命)";
+    } else if (markType === "taiko") {
+      currentVal = taiko;
+      setter = setTaiko;
+      label = "◯ (対抗)";
+    } else if (markType === "anago") {
+      currentVal = anago;
+      setter = setAnago;
+      label = "▲ (単穴)";
+    } else {
+      currentVal = renge;
+      setter = setRenge;
+      label = "△ (連下)";
+    }
+
+    if (!currentVal) {
+      setter(formattedVal);
+      showToast(`${label} に ${formattedVal} を設定しました`);
+    } else {
+      const list = currentVal
+        .split(/[,、]\s*/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+
+      if (list.includes(formattedVal)) {
+        // Toggle off if already selected
+        const updatedList = list.filter((x) => x !== formattedVal);
+        setter(updatedList.join(", "));
+        showToast(`${label} から ${formattedVal} を解除しました`);
       } else {
-        const list = currentVal.split(/[,、]\s*/).map((x) => x.trim());
-        if (!list.includes(formattedVal)) {
-          setter(`${currentVal}, ${formattedVal}`);
-        }
+        // Append if not selected
+        setter(`${currentVal}, ${formattedVal}`);
+        showToast(`${label} に ${formattedVal} を追加しました`);
       }
-      showToast(`${label} に ${formattedVal} を追加しました`);
     }
   };
 
   // Load saved memo into form for editing
   const handleEdit = (memo: MemoData) => {
+    setPreEditViewMode(viewMode);
     setViewMode("list");
     setEditingId(memo.id || null);
     setDate(memo.date);
@@ -762,6 +840,11 @@ export default function Home() {
     setScrapedPayouts({});
     setScrapedResults([]);
     setNetkeibaUrl("");
+
+    if (preEditViewMode) {
+      setViewMode(preEditViewMode);
+      setPreEditViewMode(null);
+    }
     showToast("編集をキャンセルしました");
   };
 
@@ -841,6 +924,11 @@ export default function Home() {
       setScrapedPayouts({});
       setScrapedResults([]);
       setNetkeibaUrl("");
+
+      if (preEditViewMode) {
+        setViewMode(preEditViewMode);
+        setPreEditViewMode(null);
+      }
     } else {
       showToast(res.error || "保存に失敗しました");
     }
@@ -1326,28 +1414,28 @@ export default function Home() {
                           <div className={styles.quickMarkGroup}>
                             <button
                               type="button"
-                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnHonmei}`}
+                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnHonmei} ${isHorseMarked(horse, "honmei") ? styles.quickMarkBtnHonmeiActive : ""}`}
                               onClick={() => handleQuickMark(horse, "honmei")}
                             >
                               ◎
                             </button>
                             <button
                               type="button"
-                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnTaiko}`}
+                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnTaiko} ${isHorseMarked(horse, "taiko") ? styles.quickMarkBtnTaikoActive : ""}`}
                               onClick={() => handleQuickMark(horse, "taiko")}
                             >
                               ◯
                             </button>
                             <button
                               type="button"
-                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnAnago}`}
+                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnAnago} ${isHorseMarked(horse, "anago") ? styles.quickMarkBtnAnagoActive : ""}`}
                               onClick={() => handleQuickMark(horse, "anago")}
                             >
                               ▲
                             </button>
                             <button
                               type="button"
-                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnRenge}`}
+                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnRenge} ${isHorseMarked(horse, "renge") ? styles.quickMarkBtnRengeActive : ""}`}
                               onClick={() => handleQuickMark(horse, "renge")}
                             >
                               △
@@ -2328,6 +2416,33 @@ export default function Home() {
                                             ({res.jockey})
                                           </span>
                                         )}
+                                        {(() => {
+                                          const mark = getHorseMark(
+                                            res.horseNumber,
+                                            res.horseName,
+                                            memo.prediction,
+                                          );
+                                          if (!mark) return null;
+                                          return (
+                                            <span
+                                              className={`mark-badge ${mark.className} active`}
+                                              style={{
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                width: "16px",
+                                                height: "16px",
+                                                borderRadius: "50%",
+                                                fontSize: "0.6rem",
+                                                marginLeft: "0.3rem",
+                                                verticalAlign: "middle",
+                                                fontWeight: "bold",
+                                              }}
+                                            >
+                                              {mark.symbol}
+                                            </span>
+                                          );
+                                        })()}
                                       </span>
                                     </div>
                                   ))}

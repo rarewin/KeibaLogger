@@ -478,23 +478,50 @@
   transition: all 0.15s ease;
 }
 
-.quickMarkBtn:hover {
-  background: var(--text-muted);
-  color: #fff;
-  border-color: transparent;
+@media (hover: hover) {
+  .quickMarkBtn:hover {
+    background: var(--text-muted);
+    color: #fff;
+    border-color: transparent;
+  }
+  .quickMarkBtnHonmei:hover {
+    background: var(--grad-gold);
+    color: #111827;
+  }
+  .quickMarkBtnTaiko:hover {
+    background: var(--grad-rose);
+    color: #ffffff;
+  }
+  .quickMarkBtnAnago:hover {
+    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+    color: #ffffff;
+  }
+  .quickMarkBtnRenge:hover {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    color: #ffffff;
+  }
 }
 
-.quickMarkBtnHonmei:hover {
-  background: var(--grad-gold);
+/* Active styles when a horse is marked */
+.quickMarkBtnHonmeiActive {
+  background: var(--grad-gold) !important;
+  color: #111827 !important;
+  border-color: transparent !important;
 }
-.quickMarkBtnTaiko:hover {
-  background: var(--grad-rose);
+.quickMarkBtnTaikoActive {
+  background: var(--grad-rose) !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
 }
-.quickMarkBtnAnago:hover {
-  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+.quickMarkBtnAnagoActive {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%) !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
 }
-.quickMarkBtnRenge:hover {
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+.quickMarkBtnRengeActive {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
 }
 
 /* Dynamic Ticket List Form */
