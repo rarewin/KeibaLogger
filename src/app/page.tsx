@@ -66,8 +66,23 @@ function getPermutations(array: string[], size: number): string[][] {
   return result;
 }
 
+export function normalizeTicketType(type: string): string {
+  const t = (type || "").trim();
+  if (t === "三連複" || t === "３連複" || t === "3連複") return "3連複";
+  if (t === "三連単" || t === "３連単" || t === "3連単") return "3連単";
+  if (t === "馬連" || t === "馬ﾚﾝ") return "馬連";
+  if (t === "馬単" || t === "馬ﾀﾝ") return "馬単";
+  if (t === "ワイド" || t === "ﾜｲﾄﾞ") return "ワイド";
+  if (t === "枠連" || t === "枠ﾚﾝ") return "枠連";
+  if (t === "単勝" || t === "単") return "単勝";
+  if (t === "複勝" || t === "複") return "複勝";
+  if (t === "応援馬券") return "応援馬券";
+  return t;
+}
+
 function parseNumList(str: string): string[] {
-  return str
+  return (str || "")
+    .replace(/[０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xfee0))
     .split(/[,、\s]+/)
     .map((x) => x.trim())
     .filter(Boolean);
@@ -78,9 +93,10 @@ export function expandTicketSelection(
   type: string,
   selection: string,
 ): string[] {
-  const clean = selection.trim().toUpperCase();
+  const clean = (selection || "").trim().toUpperCase();
   if (!clean) return [];
 
+  const normType = normalizeTicketType(type);
   const targetSizeMap: Record<string, number> = {
     単勝: 1,
     複勝: 1,
@@ -92,8 +108,8 @@ export function expandTicketSelection(
     "3連複": 3,
     "3連単": 3,
   };
-  const size = targetSizeMap[type] || 1;
-  const isOrderSensitive = type === "馬単" || type === "3連単";
+  const size = targetSizeMap[normType] || 1;
+  const isOrderSensitive = normType === "馬単" || normType === "3連単";
 
   // 1. BOX Notation (e.g., "BOX 3,5,6" or "3,5,6 BOX")
   const isBox = clean.includes("BOX") || clean.includes("ボックス");
@@ -112,7 +128,11 @@ export function expandTicketSelection(
 
   // 2. Nagashi (流し) & Formation (フォーメーション)
   // Splits sections by "-", "=>", "→", "⇒" or "★"
-  const sections = clean.split(/[-ー=➔→⇒★]+/g).map((s) => parseNumList(s));
+  const normalizedClean = clean.replace(/[ー―−－–—〜~=➔→⇒★]+/g, "-");
+  const sections = normalizedClean
+    .split("-")
+    .map((s) => parseNumList(s))
+    .filter((arr) => arr.length > 0);
 
   if (sections.length > 1) {
     // 2.1 Formation (e.g., "1,2 - 3,4 - 5,6")
@@ -210,10 +230,9 @@ export function expandTicketSelection(
 
   // 3. Plain single bet (e.g. "15" or "6-15")
   if (isOrderSensitive) {
-    return [clean];
+    return [parseNumList(clean).join("-")];
   }
-  const sorted = clean
-    .split(/[-ー]+/g)
+  const sorted = parseNumList(clean)
     .sort((a, b) => Number(a) - Number(b))
     .join("-");
   return [sorted];
@@ -505,42 +524,46 @@ export default function Home() {
     }
 
     const normalize = (s: string) =>
-      s
-        .split(/[-ー]/)
-        .map((x) => x.trim())
+      parseNumList(s)
         .sort((a, b) => Number(a) - Number(b))
         .join("-");
 
     const updatedTickets = tickets.map((t) => {
+      const normType = normalizeTicketType(t.type);
+
       // 1. Check Special 応援馬券 Support Wagers
-      if (t.type === "応援馬券") {
+      if (normType === "応援馬券") {
         const tanshoPayouts = scrapedPayouts["単勝"];
         const fukushoPayouts = scrapedPayouts["複勝"];
 
         let supportPayout = 0;
         let isSupportHit = false;
-        const targetHorseNum = t.selection.trim();
+        const targetHorseNums = parseNumList(t.selection);
 
-        if (tanshoPayouts) {
-          const matchedTansho = tanshoPayouts.find(
-            (p) => p.selection === targetHorseNum,
-          );
-          if (matchedTansho) {
-            supportPayout += Math.round(
-              t.investment * (matchedTansho.amount / 100),
+        for (const targetHorseNum of targetHorseNums) {
+          if (tanshoPayouts) {
+            const matchedTansho = tanshoPayouts.find(
+              (p) => parseNumList(p.selection).join("-") === targetHorseNum,
             );
-            isSupportHit = true;
+            if (matchedTansho) {
+              supportPayout += Math.round(
+                (t.investment / (targetHorseNums.length || 1)) *
+                  (matchedTansho.amount / 100),
+              );
+              isSupportHit = true;
+            }
           }
-        }
-        if (fukushoPayouts) {
-          const matchedFukusho = fukushoPayouts.find(
-            (p) => p.selection === targetHorseNum,
-          );
-          if (matchedFukusho) {
-            supportPayout += Math.round(
-              t.investment * (matchedFukusho.amount / 100),
+          if (fukushoPayouts) {
+            const matchedFukusho = fukushoPayouts.find(
+              (p) => parseNumList(p.selection).join("-") === targetHorseNum,
             );
-            isSupportHit = true;
+            if (matchedFukusho) {
+              supportPayout += Math.round(
+                (t.investment / (targetHorseNums.length || 1)) *
+                  (matchedFukusho.amount / 100),
+              );
+              isSupportHit = true;
+            }
           }
         }
 
@@ -552,19 +575,19 @@ export default function Home() {
       }
 
       // 2. BOX, Nagashi, Formations or Plain Single Bets
-      const combos = expandTicketSelection(t.type, t.selection);
+      const combos = expandTicketSelection(normType, t.selection);
       if (combos.length === 0) return { ...t, isHit: false, payout: 0 };
 
-      const typePayouts = scrapedPayouts[t.type];
+      const typePayouts = scrapedPayouts[normType] || scrapedPayouts[t.type];
       if (!typePayouts) return { ...t, isHit: false, payout: 0 };
 
       // Calculate investment unit cost per combination
       const unitInvestment = Math.round(t.investment / combos.length);
       const isOrderSensitive =
-        t.type === "馬単" ||
-        t.type === "3連単" ||
-        t.type === "単勝" ||
-        t.type === "複勝";
+        normType === "馬単" ||
+        normType === "3連単" ||
+        normType === "単勝" ||
+        normType === "複勝";
 
       let totalPayoutForTicket = 0;
       let isHit = false;
@@ -572,7 +595,10 @@ export default function Home() {
       for (const combo of combos) {
         const matched = typePayouts.find((p) => {
           if (isOrderSensitive) {
-            return p.selection === combo;
+            return (
+              parseNumList(p.selection).join("-") ===
+              parseNumList(combo).join("-")
+            );
           }
           return normalize(p.selection) === normalize(combo);
         });
@@ -650,7 +676,10 @@ export default function Home() {
 
       // Generate and save netkeiba link
       let finalUrl = urlInput.trim();
-      if (/^\d{12}$/.test(finalUrl)) {
+      const matchRaceId = finalUrl.match(/race_id=(\d{12})/);
+      if (matchRaceId) {
+        finalUrl = `https://race.netkeiba.com/race/result.html?race_id=${matchRaceId[1]}`;
+      } else if (/^\d{12}$/.test(finalUrl)) {
         finalUrl = `https://race.netkeiba.com/race/result.html?race_id=${finalUrl}`;
       }
       setNetkeibaUrl(finalUrl);
@@ -821,6 +850,7 @@ export default function Home() {
       if (s2) parts.push(s2);
       if (s3) parts.push(s3);
 
+      const normType = normalizeTicketType(ticketType);
       const targetSizeMap: Record<string, number> = {
         単勝: 1,
         複勝: 1,
@@ -832,7 +862,7 @@ export default function Home() {
         "3連複": 3,
         "3連単": 3,
       };
-      const requiredSections = targetSizeMap[ticketType] || 1;
+      const requiredSections = targetSizeMap[normType] || 1;
 
       if (parts.length > 0) {
         resultStr = parts.slice(0, requiredSections).join(" - ");
@@ -844,7 +874,7 @@ export default function Home() {
 
   // Helper: Reverse-parse a wagers ticket selection string to populate the GUI button highlights
   const parseSelectionToGui = (ticketType: string, selection: string) => {
-    const clean = selection.trim().toUpperCase();
+    const clean = (selection || "").trim().toUpperCase();
 
     let betType: "normal" | "nagashi" | "box" = "normal";
     let sel1: number[] = [];
@@ -852,8 +882,7 @@ export default function Home() {
     let sel3: number[] = [];
 
     const parseNumbers = (str: string) => {
-      return str
-        .split(/[,、\s]+/)
+      return parseNumList(str)
         .map(Number)
         .filter((n) => !isNaN(n) && n > 0);
     };
@@ -863,7 +892,8 @@ export default function Home() {
       const raw = clean.replace(/BOX|ボックス/gi, "");
       sel1 = parseNumbers(raw);
     } else {
-      const sections = clean.split(/[-ー=➔→⇒★]+/g);
+      const normalizedClean = clean.replace(/[ー―−－–—〜~=➔→⇒★]+/g, "-");
+      const sections = normalizedClean.split("-");
       if (sections.length > 1) {
         sel1 = parseNumbers(sections[0]);
         if (sections[1]) sel2 = parseNumbers(sections[1]);
@@ -1894,22 +1924,21 @@ export default function Home() {
                               columns = ["軸", "相手"];
                             } else {
                               // normal
+                              const normT = normalizeTicketType(ticket.type);
                               if (
-                                ["単勝", "複勝", "応援馬券"].includes(
-                                  ticket.type,
-                                )
+                                ["単勝", "複勝", "応援馬券"].includes(normT)
                               ) {
                                 columns = ["選択"];
                               } else if (
                                 ["枠連", "馬連", "馬単", "ワイド"].includes(
-                                  ticket.type,
+                                  normT,
                                 )
                               ) {
                                 columns = ["1頭目", "2頭目"];
-                              } else if (
-                                ["3連複", "3連単"].includes(ticket.type)
-                              ) {
+                              } else if (normT === "3連単") {
                                 columns = ["1着", "2着", "3着"];
+                              } else if (normT === "3連複") {
+                                columns = ["1頭目", "2頭目", "3頭目"];
                               } else {
                                 columns = ["選択"];
                               }

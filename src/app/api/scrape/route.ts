@@ -209,8 +209,8 @@ function extractPayouts(
     { key: "馬連", className: "Umaren", chunkSize: 2 },
     { key: "馬単", className: "Umatan", chunkSize: 2 },
     { key: "ワイド", className: "Wide", chunkSize: 2 },
-    { key: "3連複", className: "Sanrenpuku", chunkSize: 3 },
-    { key: "3連単", className: "Sanrentan", chunkSize: 3 },
+    { key: "3連複", className: "(?:Fuku3|Sanrenpuku)", chunkSize: 3 },
+    { key: "3連単", className: "(?:Tan3|Sanrentan)", chunkSize: 3 },
   ];
 
   for (const type of ticketTypes) {
@@ -233,6 +233,7 @@ function extractPayouts(
         const rawResultText = resultMatch[1]
           .replace(/<br\s*\/?>/gi, "\n")
           .replace(/<\/div>/gi, "\n")
+          .replace(/<\/li>/gi, "\n")
           .replace(/<[^>]+>/g, "")
           .trim();
 
@@ -409,6 +410,7 @@ export async function GET(request: NextRequest) {
         .trim();
       let track = "東京";
       let raceNumber = "11";
+      let dateVal = new Date().toISOString().split("T")[0];
       const metaMatch = title.match(
         /(\d{4}年\d{1,2}月\d{1,2}日)\s+(\S+?)(\d{1,2})R/,
       );
@@ -416,10 +418,22 @@ export async function GET(request: NextRequest) {
       if (metaMatch) {
         track = metaMatch[2];
         raceNumber = metaMatch[3];
+        const dateMatch = metaMatch[1].match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+        if (dateMatch) {
+          const yyyy = dateMatch[1];
+          const mm = dateMatch[2].padStart(2, "0");
+          const dd = dateMatch[3].padStart(2, "0");
+          dateVal = `${yyyy}-${mm}-${dd}`;
+        }
       } else if (raceId) {
         const trackCode = raceId.substring(4, 6);
         track = TRACKS[trackCode] || "東京";
         raceNumber = parseInt(raceId.substring(10, 12), 10).toString();
+        const yyyy = raceId.substring(0, 4);
+        const today = new Date();
+        const mm = String(today.getMonth() + 1).padStart(2, "0");
+        const dd = String(today.getDate()).padStart(2, "0");
+        dateVal = `${yyyy}-${mm}-${dd}`;
       }
 
       if (horses.length > 0) {
@@ -428,7 +442,7 @@ export async function GET(request: NextRequest) {
           source: isResultFetch
             ? "scraped-netkeiba-result"
             : "scraped-netkeiba-entries",
-          date: new Date().toISOString().split("T")[0],
+          date: dateVal,
           track,
           raceNumber,
           raceName,
@@ -453,8 +467,11 @@ export async function GET(request: NextRequest) {
 
     const track = TRACKS[trackCode] || "東京";
     const raceNumber = parseInt(raceNumCode, 10).toString();
+    const yyyy = raceId.substring(0, 4);
     const today = new Date();
-    const dateStr = today.toISOString().split("T")[0];
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const dd = String(today.getDate()).padStart(2, "0");
+    const dateStr = `${yyyy}-${mm}-${dd}`;
 
     const isSprint =
       (trackCode === "10" && raceNumber === "11") ||
