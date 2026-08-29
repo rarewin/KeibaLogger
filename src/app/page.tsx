@@ -111,7 +111,13 @@ export function expandTicketSelection(
   const size = targetSizeMap[normType] || 1;
   const isOrderSensitive = normType === "馬単" || normType === "3連単";
 
-  // 1. BOX Notation (e.g., "BOX 3,5,6" or "3,5,6 BOX")
+  // 1. Single horse wagers (単勝, 複勝, 応援馬券)
+  if (size === 1) {
+    const nums = parseNumList(clean);
+    return Array.from(new Set(nums));
+  }
+
+  // 2. BOX Notation (e.g., "BOX 3,5,6" or "3,5,6 BOX")
   const isBox = clean.includes("BOX") || clean.includes("ボックス");
   if (isBox) {
     const rawNums = clean.replace(/BOX|ボックス/gi, "");
@@ -126,7 +132,7 @@ export function expandTicketSelection(
     );
   }
 
-  // 2. Nagashi (流し) & Formation (フォーメーション)
+  // 3. Nagashi (流し) & Formation (フォーメーション)
   // Splits sections by "-", "=>", "→", "⇒" or "★"
   const normalizedClean = clean.replace(/[ー―−－–—〜~=➔→⇒★]+/g, "-");
   const sections = normalizedClean
@@ -135,7 +141,7 @@ export function expandTicketSelection(
     .filter((arr) => arr.length > 0);
 
   if (sections.length > 1) {
-    // 2.1 Formation (e.g., "1,2 - 3,4 - 5,6")
+    // 3.1 Formation (e.g., "1,2 - 3,4 - 5,6")
     if (sections.length === size) {
       const results: string[] = [];
 
@@ -163,7 +169,7 @@ export function expandTicketSelection(
       return Array.from(new Set(results));
     }
 
-    // 2.2 Nagashi (流し) (e.g., "1 - 2,3,4")
+    // 3.2 Nagashi (流し) (e.g., "1 - 2,3,4")
     if (sections.length === 2) {
       const axis = sections[0];
       const opponents = sections[1];
@@ -228,14 +234,22 @@ export function expandTicketSelection(
     }
   }
 
-  // 3. Plain single bet (e.g. "15" or "6-15")
-  if (isOrderSensitive) {
-    return [parseNumList(clean).join("-")];
+  // 4. Multiple comma-separated selections for multi-horse wagers without dashes (e.g. "3, 5, 8" for 馬連)
+  const nums = parseNumList(clean);
+  if (nums.length >= size) {
+    if (nums.length === size) {
+      if (isOrderSensitive) return [nums.join("-")];
+      return [nums.sort((a, b) => Number(a) - Number(b)).join("-")];
+    }
+    if (isOrderSensitive) {
+      return getPermutations(nums, size).map((arr) => arr.join("-"));
+    }
+    return getCombinations(nums, size).map((arr) =>
+      arr.sort((a, b) => Number(a) - Number(b)).join("-"),
+    );
   }
-  const sorted = parseNumList(clean)
-    .sort((a, b) => Number(a) - Number(b))
-    .join("-");
-  return [sorted];
+
+  return [clean];
 }
 
 // Calculate payouts and hit statuses for an array of tickets based on scraped dividends
@@ -270,7 +284,12 @@ export function calculateTicketsPayout<
 
       let supportPayout = 0;
       let isSupportHit = false;
-      const targetHorseNums = parseNumList(t.selection);
+      const targetHorseNums = expandTicketSelection("応援馬券", t.selection);
+      if (targetHorseNums.length === 0) return { ...t, isHit: false, payout: 0 };
+
+      // Each horse has 1 unit of 単勝 and 1 unit of 複勝 (total bets = targetHorseNums.length * 2)
+      const totalBets = targetHorseNums.length * 2;
+      const unitInvestment = Math.round(t.investment / totalBets);
 
       for (const targetHorseNum of targetHorseNums) {
         if (tanshoPayouts) {
@@ -279,8 +298,7 @@ export function calculateTicketsPayout<
           );
           if (matchedTansho) {
             supportPayout += Math.round(
-              (t.investment / (targetHorseNums.length || 1)) *
-                (matchedTansho.amount / 100),
+              unitInvestment * (matchedTansho.amount / 100),
             );
             isSupportHit = true;
           }
@@ -291,8 +309,7 @@ export function calculateTicketsPayout<
           );
           if (matchedFukusho) {
             supportPayout += Math.round(
-              (t.investment / (targetHorseNums.length || 1)) *
-                (matchedFukusho.amount / 100),
+              unitInvestment * (matchedFukusho.amount / 100),
             );
             isSupportHit = true;
           }
@@ -550,9 +567,9 @@ export default function Home() {
     }, 3000);
   };
 
-  // Helper: Calculate actual investment for a single ticket (応援馬券 costs double)
+  // Helper: Calculate actual investment for a single ticket
   const getTicketCost = (t: Omit<TicketData, "id"> | TicketData) => {
-    return t.type === "応援馬券" ? t.investment * 2 : t.investment;
+    return t.investment;
   };
 
   // Calculate Aggregated Statistics
@@ -605,19 +622,23 @@ export default function Home() {
 
     if (key === "selection") {
       newTickets[index].selection = value;
-      // Auto-compute combinations count and fill total investment
+      // Auto-compute combinations count and fill total investment (200 Yen per horse for 応援馬券, 100 Yen per combo for others)
       const combos = expandTicketSelection(newTickets[index].type, value);
       if (combos.length > 0) {
-        const factor = newTickets[index].type === "応援馬券" ? 2 : 1;
-        newTickets[index].investment = 100 * combos.length * factor;
+        const unitCost =
+          normalizeTicketType(newTickets[index].type) === "応援馬券"
+            ? 200
+            : 100;
+        newTickets[index].investment = unitCost * combos.length;
       }
     } else if (key === "type") {
       newTickets[index].type = value;
       // Re-compute combos count on type change
       const combos = expandTicketSelection(value, newTickets[index].selection);
       if (combos.length > 0) {
-        const factor = value === "応援馬券" ? 2 : 1;
-        newTickets[index].investment = 100 * combos.length * factor;
+        const unitCost =
+          normalizeTicketType(value) === "応援馬券" ? 200 : 100;
+        newTickets[index].investment = unitCost * combos.length;
       }
     } else {
       newTickets[index] = {
@@ -1984,7 +2005,7 @@ export default function Home() {
                               }
                               required
                             />
-                            {ticket.type === "応援馬券" && (
+                            {normalizeTicketType(ticket.type) === "応援馬券" && (
                               <span
                                 style={{
                                   position: "absolute",
@@ -1997,7 +2018,7 @@ export default function Home() {
                                   fontWeight: "bold",
                                 }}
                               >
-                                ×2
+                                単+複 (計{(ticket.investment || 0).toLocaleString()}円)
                               </span>
                             )}
                           </div>
@@ -2596,6 +2617,42 @@ export default function Home() {
                   <polyline points="10 9 9 9 8 9" />
                 </svg>
                 ログ履歴 ({memos.length}件)
+                <button
+                  type="button"
+                  title="データを再読み込み"
+                  style={{
+                    background: "rgba(255, 255, 255, 0.05)",
+                    border: "1px solid var(--border-color)",
+                    color: "var(--text-secondary)",
+                    cursor: "pointer",
+                    padding: "0.25rem 0.45rem",
+                    borderRadius: "6px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.25rem",
+                    marginLeft: "0.5rem",
+                    fontSize: "0.7rem",
+                    verticalAlign: "middle",
+                  }}
+                  onClick={async () => {
+                    await refreshMemos();
+                    showToast("ログ履歴を再読み込みしました");
+                  }}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                  >
+                    <polyline points="23 4 23 10 17 10" />
+                    <polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                  <span>更新</span>
+                </button>
               </h2>
 
               {/* View Toggle Tabs */}
@@ -3291,18 +3348,22 @@ export default function Home() {
                                             </td>
                                             <td>
                                               {actualCost.toLocaleString()}円
-                                              {t.type === "応援馬券" && (
-                                                <span
-                                                  style={{
-                                                    fontSize: "0.7rem",
-                                                    opacity: 0.6,
-                                                    marginLeft: "0.2rem",
-                                                  }}
-                                                >
-                                                  (単{t.investment} / 複
-                                                  {t.investment})
-                                                </span>
-                                              )}
+                                              {normalizeTicketType(t.type) === "応援馬券" && (() => {
+                                                const horseCount = Math.max(1, expanded.length);
+                                                const perBet = Math.round(t.investment / (horseCount * 2));
+                                                return (
+                                                  <span
+                                                    style={{
+                                                      fontSize: "0.7rem",
+                                                      opacity: 0.6,
+                                                      marginLeft: "0.2rem",
+                                                    }}
+                                                  >
+                                                    ({horseCount > 1 ? "各" : ""}単{perBet.toLocaleString()}円 / 複
+                                                    {perBet.toLocaleString()}円)
+                                                  </span>
+                                                );
+                                              })()}
                                             </td>
                                             <td>
                                               {t.payout.toLocaleString()}円

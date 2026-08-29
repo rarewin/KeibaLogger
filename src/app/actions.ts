@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { prisma } from "../lib/prisma";
 
 export interface TicketData {
@@ -158,6 +159,7 @@ export async function saveMemo(data: Omit<MemoData, "id"> & { id?: string }) {
           },
         });
       });
+      revalidatePath("/");
       return { success: true, id: memo.id };
     }
 
@@ -176,6 +178,7 @@ export async function saveMemo(data: Omit<MemoData, "id"> & { id?: string }) {
         },
       },
     });
+    revalidatePath("/");
     return { success: true, id: memo.id };
   } catch (error) {
     console.error("Error saving memo:", error);
@@ -189,6 +192,7 @@ export async function deleteMemo(id: string) {
     await prisma.memo.delete({
       where: { id },
     });
+    revalidatePath("/");
     return { success: true };
   } catch (error) {
     console.error("Error deleting memo:", error);
