@@ -238,6 +238,119 @@ export function expandTicketSelection(
   return [sorted];
 }
 
+// Calculate payouts and hit statuses for an array of tickets based on scraped dividends
+export function calculateTicketsPayout<
+  T extends {
+    type: string;
+    selection: string;
+    investment: number;
+    payout: number;
+    isHit: boolean;
+  },
+>(
+  ticketsList: T[],
+  scrapedPayouts: Record<string, { selection: string; amount: number }[]>,
+): T[] {
+  if (!scrapedPayouts || Object.keys(scrapedPayouts).length === 0) {
+    return ticketsList;
+  }
+
+  const normalize = (s: string) =>
+    parseNumList(s)
+      .sort((a, b) => Number(a) - Number(b))
+      .join("-");
+
+  return ticketsList.map((t) => {
+    const normType = normalizeTicketType(t.type);
+
+    // 1. Check Special 応援馬券 Support Wagers
+    if (normType === "応援馬券") {
+      const tanshoPayouts = scrapedPayouts["単勝"];
+      const fukushoPayouts = scrapedPayouts["複勝"];
+
+      let supportPayout = 0;
+      let isSupportHit = false;
+      const targetHorseNums = parseNumList(t.selection);
+
+      for (const targetHorseNum of targetHorseNums) {
+        if (tanshoPayouts) {
+          const matchedTansho = tanshoPayouts.find(
+            (p) => parseNumList(p.selection).join("-") === targetHorseNum,
+          );
+          if (matchedTansho) {
+            supportPayout += Math.round(
+              (t.investment / (targetHorseNums.length || 1)) *
+                (matchedTansho.amount / 100),
+            );
+            isSupportHit = true;
+          }
+        }
+        if (fukushoPayouts) {
+          const matchedFukusho = fukushoPayouts.find(
+            (p) => parseNumList(p.selection).join("-") === targetHorseNum,
+          );
+          if (matchedFukusho) {
+            supportPayout += Math.round(
+              (t.investment / (targetHorseNums.length || 1)) *
+                (matchedFukusho.amount / 100),
+            );
+            isSupportHit = true;
+          }
+        }
+      }
+
+      return {
+        ...t,
+        isHit: isSupportHit,
+        payout: supportPayout,
+      };
+    }
+
+    // 2. BOX, Nagashi, Formations or Plain Single Bets
+    const combos = expandTicketSelection(normType, t.selection);
+    if (combos.length === 0) return { ...t, isHit: false, payout: 0 };
+
+    const typePayouts = scrapedPayouts[normType] || scrapedPayouts[t.type];
+    if (!typePayouts) return { ...t, isHit: false, payout: 0 };
+
+    // Calculate investment unit cost per combination
+    const unitInvestment = Math.round(t.investment / combos.length);
+    const isOrderSensitive =
+      normType === "馬単" ||
+      normType === "3連単" ||
+      normType === "単勝" ||
+      normType === "複勝";
+
+    let totalPayoutForTicket = 0;
+    let isHit = false;
+
+    for (const combo of combos) {
+      const matched = typePayouts.find((p) => {
+        if (isOrderSensitive) {
+          return (
+            parseNumList(p.selection).join("-") ===
+            parseNumList(combo).join("-")
+          );
+        }
+        return normalize(p.selection) === normalize(combo);
+      });
+
+      if (matched) {
+        totalPayoutForTicket += Math.round(
+          unitInvestment * (matched.amount / 100),
+        );
+        isHit = true;
+      }
+    }
+
+    return {
+      ...t,
+      isHit,
+      payout: totalPayoutForTicket,
+    };
+  });
+}
+
 // Initial dummy data with nested tickets and results
 const INITIAL_MEMOS: Omit<MemoData, "id">[] = [
   {
@@ -416,6 +529,7 @@ export default function Home() {
   const [tickets, setTickets] = useState<Omit<TicketData, "id">[]>([
     { type: "単勝", selection: "", investment: 100, payout: 0, isHit: false },
   ]);
+  const [syncingMemoId, setSyncingMemoId] = useState<string | null>(null);
 
   // Helper to load and sync data from DB
   const refreshMemos = async () => {
@@ -513,7 +627,11 @@ export default function Home() {
       };
     }
 
-    setTickets(newTickets);
+    if (scrapedPayouts && Object.keys(scrapedPayouts).length > 0) {
+      setTickets(calculateTicketsPayout(newTickets, scrapedPayouts));
+    } else {
+      setTickets(newTickets);
+    }
   };
 
   // Auto-calculate payouts based on scraped dividends (supports multi-hits for BOX/Formations)
@@ -523,101 +641,7 @@ export default function Home() {
       return;
     }
 
-    const normalize = (s: string) =>
-      parseNumList(s)
-        .sort((a, b) => Number(a) - Number(b))
-        .join("-");
-
-    const updatedTickets = tickets.map((t) => {
-      const normType = normalizeTicketType(t.type);
-
-      // 1. Check Special 応援馬券 Support Wagers
-      if (normType === "応援馬券") {
-        const tanshoPayouts = scrapedPayouts["単勝"];
-        const fukushoPayouts = scrapedPayouts["複勝"];
-
-        let supportPayout = 0;
-        let isSupportHit = false;
-        const targetHorseNums = parseNumList(t.selection);
-
-        for (const targetHorseNum of targetHorseNums) {
-          if (tanshoPayouts) {
-            const matchedTansho = tanshoPayouts.find(
-              (p) => parseNumList(p.selection).join("-") === targetHorseNum,
-            );
-            if (matchedTansho) {
-              supportPayout += Math.round(
-                (t.investment / (targetHorseNums.length || 1)) *
-                  (matchedTansho.amount / 100),
-              );
-              isSupportHit = true;
-            }
-          }
-          if (fukushoPayouts) {
-            const matchedFukusho = fukushoPayouts.find(
-              (p) => parseNumList(p.selection).join("-") === targetHorseNum,
-            );
-            if (matchedFukusho) {
-              supportPayout += Math.round(
-                (t.investment / (targetHorseNums.length || 1)) *
-                  (matchedFukusho.amount / 100),
-              );
-              isSupportHit = true;
-            }
-          }
-        }
-
-        return {
-          ...t,
-          isHit: isSupportHit,
-          payout: supportPayout,
-        };
-      }
-
-      // 2. BOX, Nagashi, Formations or Plain Single Bets
-      const combos = expandTicketSelection(normType, t.selection);
-      if (combos.length === 0) return { ...t, isHit: false, payout: 0 };
-
-      const typePayouts = scrapedPayouts[normType] || scrapedPayouts[t.type];
-      if (!typePayouts) return { ...t, isHit: false, payout: 0 };
-
-      // Calculate investment unit cost per combination
-      const unitInvestment = Math.round(t.investment / combos.length);
-      const isOrderSensitive =
-        normType === "馬単" ||
-        normType === "3連単" ||
-        normType === "単勝" ||
-        normType === "複勝";
-
-      let totalPayoutForTicket = 0;
-      let isHit = false;
-
-      for (const combo of combos) {
-        const matched = typePayouts.find((p) => {
-          if (isOrderSensitive) {
-            return (
-              parseNumList(p.selection).join("-") ===
-              parseNumList(combo).join("-")
-            );
-          }
-          return normalize(p.selection) === normalize(combo);
-        });
-
-        if (matched) {
-          totalPayoutForTicket += Math.round(
-            unitInvestment * (matched.amount / 100),
-          );
-          isHit = true;
-        }
-      }
-
-      return {
-        ...t,
-        isHit,
-        payout: totalPayoutForTicket,
-      };
-    });
-
+    const updatedTickets = calculateTicketsPayout(tickets, scrapedPayouts);
     setTickets(updatedTickets);
     showToast("払戻金・的中状況を自動計算しました！");
   };
@@ -658,8 +682,9 @@ export default function Home() {
       setFetchedHorses(sortedHorses);
 
       // Load payouts and finishing order
-      if (data.payouts) {
+      if (data.payouts && Object.keys(data.payouts).length > 0) {
         setScrapedPayouts(data.payouts);
+        setTickets((prev) => calculateTicketsPayout(prev, data.payouts));
       } else {
         setScrapedPayouts({});
       }
@@ -955,8 +980,97 @@ export default function Home() {
       setFetchedHorses([]);
     }
 
+    if (memo.netkeibaUrl) {
+      fetch(`/api/scrape?url=${encodeURIComponent(memo.netkeibaUrl)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data && data.payouts && Object.keys(data.payouts).length > 0) {
+            setScrapedPayouts(data.payouts);
+            if (data.results && data.results.length > 0) {
+              setScrapedResults(data.results);
+            }
+            setTickets((prev) => calculateTicketsPayout(prev, data.payouts));
+          }
+        })
+        .catch((e) =>
+          console.warn("Failed to background fetch race payouts:", e),
+        );
+    }
+
     window.scrollTo({ top: 0, behavior: "smooth" });
     showToast("記録を編集フォームに読み込みました");
+  };
+
+  // Sync / Refresh Race Results and Payouts for a saved memo
+  const handleSyncMemoPayouts = async (memo: MemoData, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!memo.netkeibaUrl) {
+      showToast("netkeibaのURLが設定されていません");
+      return;
+    }
+
+    setSyncingMemoId(memo.id || null);
+    showToast("最新のレース結果・払戻金を取得中...");
+
+    try {
+      const response = await fetch(
+        `/api/scrape?url=${encodeURIComponent(memo.netkeibaUrl)}`,
+      );
+      if (!response.ok) throw new Error("取得に失敗しました");
+      const data = await response.json();
+
+      if (!data.payouts || Object.keys(data.payouts).length === 0) {
+        showToast("払戻金データがまだ確定していないか、取得できませんでした");
+        setSyncingMemoId(null);
+        return;
+      }
+
+      const recomputedTickets = calculateTicketsPayout(
+        memo.tickets,
+        data.payouts,
+      );
+      const totalInvest = recomputedTickets.reduce(
+        (sum, t) => sum + getTicketCost(t),
+        0,
+      );
+      const totalPay = recomputedTickets.reduce((sum, t) => sum + t.payout, 0);
+
+      let finalResult: "hit" | "miss" | "pending" = "pending";
+      if (totalInvest > 0) {
+        if (totalPay > 0) {
+          finalResult = "hit";
+        } else {
+          finalResult = "miss";
+        }
+      }
+
+      const memoPayload: MemoData = {
+        ...memo,
+        result: finalResult,
+        resultList:
+          data.results && data.results.length > 0
+            ? data.results
+            : memo.resultList,
+        tickets: recomputedTickets.map((t) => ({
+          type: t.type,
+          selection: t.selection,
+          investment: t.investment,
+          payout: t.payout,
+          isHit: t.payout > 0 || (t as any).isHit === true,
+        })),
+      };
+
+      const res = await saveMemo(memoPayload);
+      if (res.success) {
+        await refreshMemos();
+        showToast("最新の払戻金と的中状況を同期・更新しました！");
+      }
+    } catch (err) {
+      console.error("Error syncing memo payouts:", err);
+      showToast("払戻金の取得・同期に失敗しました");
+    } finally {
+      setSyncingMemoId(null);
+    }
   };
 
   // Cancel edit mode
@@ -992,14 +1106,25 @@ export default function Home() {
       return;
     }
 
-    const totalInvest = tickets.reduce((sum, t) => sum + getTicketCost(t), 0);
-    const totalPay = tickets.reduce((sum, t) => sum + t.payout, 0);
+    const calculatedTickets =
+      scrapedPayouts && Object.keys(scrapedPayouts).length > 0
+        ? calculateTicketsPayout(tickets, scrapedPayouts)
+        : tickets;
+
+    const totalInvest = calculatedTickets.reduce(
+      (sum, t) => sum + getTicketCost(t),
+      0,
+    );
+    const totalPay = calculatedTickets.reduce((sum, t) => sum + t.payout, 0);
 
     let finalResult: "hit" | "miss" | "pending" = "pending";
     if (totalInvest > 0) {
       if (totalPay > 0) {
         finalResult = "hit";
-      } else {
+      } else if (
+        scrapedResults.length > 0 ||
+        (scrapedPayouts && Object.keys(scrapedPayouts).length > 0)
+      ) {
         finalResult = "miss";
       }
     }
@@ -1016,12 +1141,12 @@ export default function Home() {
       resultList: scrapedResults,
       netkeibaUrl: netkeibaUrl || undefined,
       fetchedHorses: fetchedHorses.length > 0 ? fetchedHorses : undefined,
-      tickets: tickets.map((t) => ({
+      tickets: calculatedTickets.map((t) => ({
         type: t.type,
         selection: t.selection,
         investment: t.investment,
         payout: t.payout,
-        isHit: t.payout > 0,
+        isHit: t.payout > 0 || (t as any).isHit === true,
       })),
     };
 
@@ -3236,13 +3361,36 @@ export default function Home() {
                                 style={{
                                   display: "flex",
                                   gap: "0.5rem",
+                                  alignItems: "center",
                                 }}
                               >
+                                {memo.netkeibaUrl && (
+                                  <button
+                                    type="button"
+                                    className={styles.deleteBtn}
+                                    style={{
+                                      backgroundColor:
+                                        "rgba(16, 185, 129, 0.15)",
+                                      color: "var(--color-emerald)",
+                                      opacity:
+                                        syncingMemoId === memo.id ? 0.6 : 1,
+                                    }}
+                                    disabled={syncingMemoId === memo.id}
+                                    onClick={(e) =>
+                                      handleSyncMemoPayouts(memo, e)
+                                    }
+                                  >
+                                    {syncingMemoId === memo.id
+                                      ? "同期中..."
+                                      : "結果・払戻を再同期"}
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   className={styles.deleteBtn}
                                   style={{
-                                    backgroundColor: "rgba(59, 130, 246, 0.15)",
+                                    backgroundColor:
+                                      "rgba(59, 130, 246, 0.15)",
                                     color: "var(--color-blue)",
                                   }}
                                   onClick={(e) => {
