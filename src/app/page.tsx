@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   getMemos,
   saveMemo,
@@ -446,6 +446,68 @@ const normalizeDate = (dateStr: string): string => {
   return dateStr;
 };
 
+export type StatsPeriod = "all" | "week" | "month" | "year";
+
+export function getWeekRange(d: Date): {
+  startStr: string;
+  endStr: string;
+  label: string;
+} {
+  const target = new Date(d);
+  const day = target.getDay(); // 0 (Sun) to 6 (Sat)
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+
+  const monday = new Date(target);
+  monday.setDate(target.getDate() + diffToMonday);
+
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+
+  const mYear = monday.getFullYear();
+  const mMonth = String(monday.getMonth() + 1).padStart(2, "0");
+  const mDate = String(monday.getDate()).padStart(2, "0");
+
+  const sYear = sunday.getFullYear();
+  const sMonth = String(sunday.getMonth() + 1).padStart(2, "0");
+  const sDate = String(sunday.getDate()).padStart(2, "0");
+
+  let label = `${mYear}/${mMonth}/${mDate} 〜 ${sMonth}/${sDate}`;
+  if (mYear !== sYear) {
+    label = `${mYear}/${mMonth}/${mDate} 〜 ${sYear}/${sMonth}/${sDate}`;
+  }
+
+  const startStr = `${mYear}-${mMonth}-${mDate}`;
+  const endStr = `${sYear}-${sMonth}-${sDate}`;
+
+  return { startStr, endStr, label };
+}
+
+export function getMonthRange(d: Date): {
+  startStr: string;
+  endStr: string;
+  label: string;
+} {
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const end = new Date(y, m + 1, 0);
+  const startStr = `${y}-${String(m + 1).padStart(2, "0")}-01`;
+  const endStr = `${y}-${String(m + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
+  const label = `${y}年 ${m + 1}月`;
+  return { startStr, endStr, label };
+}
+
+export function getYearRange(d: Date): {
+  startStr: string;
+  endStr: string;
+  label: string;
+} {
+  const y = d.getFullYear();
+  const startStr = `${y}-01-01`;
+  const endStr = `${y}-12-31`;
+  const label = `${y}年`;
+  return { startStr, endStr, label };
+}
+
 export default function Home() {
   const [memos, setMemos] = useState<MemoData[]>([]);
   const [activeMemoId, setActiveMemoId] = useState<string | null>(null);
@@ -548,6 +610,12 @@ export default function Home() {
   ]);
   const [syncingMemoId, setSyncingMemoId] = useState<string | null>(null);
 
+  // Statistics Period Filter State (All, Week, Month, Year)
+  const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>("all");
+  const [statsReferenceDate, setStatsReferenceDate] = useState<Date>(
+    new Date(),
+  );
+
   // Helper to load and sync data from DB
   const refreshMemos = async () => {
     const data = await getMemos();
@@ -567,17 +635,58 @@ export default function Home() {
     }, 3000);
   };
 
+  // Period label and memo filtering for statistics
+  const { filteredStatsMemos, statsPeriodLabel } = useMemo(() => {
+    if (statsPeriod === "all") {
+      return {
+        filteredStatsMemos: memos,
+        statsPeriodLabel: "全期間",
+      };
+    }
+
+    let startStr = "";
+    let endStr = "";
+    let label = "";
+
+    if (statsPeriod === "week") {
+      const range = getWeekRange(statsReferenceDate);
+      startStr = range.startStr;
+      endStr = range.endStr;
+      label = range.label;
+    } else if (statsPeriod === "month") {
+      const range = getMonthRange(statsReferenceDate);
+      startStr = range.startStr;
+      endStr = range.endStr;
+      label = range.label;
+    } else {
+      const range = getYearRange(statsReferenceDate);
+      startStr = range.startStr;
+      endStr = range.endStr;
+      label = range.label;
+    }
+
+    const filtered = memos.filter((m) => {
+      const mDate = normalizeDate(m.date);
+      return mDate >= startStr && mDate <= endStr;
+    });
+
+    return {
+      filteredStatsMemos: filtered,
+      statsPeriodLabel: label,
+    };
+  }, [memos, statsPeriod, statsReferenceDate]);
+
   // Helper: Calculate actual investment for a single ticket
   const getTicketCost = (t: Omit<TicketData, "id"> | TicketData) => {
     return t.investment;
   };
 
-  // Calculate Aggregated Statistics
-  const totalInvestment = memos.reduce((sum, memo) => {
+  // Calculate Aggregated Statistics (Scoped to selected period)
+  const totalInvestment = filteredStatsMemos.reduce((sum, memo) => {
     return sum + memo.tickets.reduce((tSum, t) => tSum + getTicketCost(t), 0);
   }, 0);
 
-  const totalPayout = memos.reduce((sum, memo) => {
+  const totalPayout = filteredStatsMemos.reduce((sum, memo) => {
     return sum + memo.tickets.reduce((tSum, t) => tSum + t.payout, 0);
   }, 0);
 
@@ -585,14 +694,24 @@ export default function Home() {
   const recoveryRate =
     totalInvestment > 0 ? Math.round((totalPayout / totalInvestment) * 100) : 0;
 
-  const totalRacesWithResult = memos.filter(
+  const totalRacesWithResult = filteredStatsMemos.filter(
     (item) => item.result !== "pending",
   ).length;
-  const hitRaces = memos.filter((item) => item.result === "hit").length;
+  const hitRaces = filteredStatsMemos.filter((item) => item.result === "hit").length;
   const hitRate =
     totalRacesWithResult > 0
       ? Math.round((hitRaces / totalRacesWithResult) * 100)
       : 0;
+
+  const periodLabelMap: Record<
+    StatsPeriod,
+    { income: string; recovery: string; hit: string }
+  > = {
+    all: { income: "通算収支", recovery: "回収率", hit: "的中率" },
+    week: { income: "週間収支", recovery: "週間回収率", hit: "週間的中率" },
+    month: { income: "月間収支", recovery: "月間回収率", hit: "月間的中率" },
+    year: { income: "年間収支", recovery: "年間回収率", hit: "年間的中率" },
+  };
 
   // Toggle Accordion Detail
   const toggleDetail = (id: string) => {
@@ -1283,6 +1402,198 @@ export default function Home() {
             </p>
           </div>
 
+          {/* Quick Statistics Header & Period Switcher */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "0.75rem",
+              marginBottom: "1rem",
+              background: "rgba(255, 255, 255, 0.02)",
+              padding: "0.6rem 0.85rem",
+              borderRadius: "12px",
+              border: "1px solid var(--border-color)",
+            }}
+          >
+            {/* Period Selection Tabs */}
+            <div
+              style={{
+                display: "flex",
+                background: "rgba(0, 0, 0, 0.25)",
+                padding: "3px",
+                borderRadius: "8px",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                gap: "3px",
+              }}
+            >
+              {(
+                [
+                  { key: "all", label: "全期間" },
+                  { key: "week", label: "週別" },
+                  { key: "month", label: "月別" },
+                  { key: "year", label: "年別" },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  style={{
+                    padding: "0.35rem 0.75rem",
+                    fontSize: "0.8rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    background:
+                      statsPeriod === tab.key
+                        ? "var(--color-gold)"
+                        : "transparent",
+                    color:
+                      statsPeriod === tab.key
+                        ? "#000000"
+                        : "var(--text-secondary)",
+                    cursor: "pointer",
+                    fontWeight: "700",
+                    transition: "all 0.2s ease",
+                  }}
+                  onClick={() => setStatsPeriod(tab.key)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Sub-period Navigator (visible when week, month, or year is active) */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.4rem",
+              }}
+            >
+              {statsPeriod !== "all" ? (
+                <>
+                  <button
+                    type="button"
+                    title="前の期間へ"
+                    style={{
+                      background: "rgba(255, 255, 255, 0.05)",
+                      border: "1px solid var(--border-color)",
+                      color: "var(--text-primary)",
+                      cursor: "pointer",
+                      padding: "0.25rem 0.5rem",
+                      borderRadius: "6px",
+                      fontWeight: "bold",
+                      fontSize: "0.85rem",
+                    }}
+                    onClick={() => {
+                      const nextDate = new Date(statsReferenceDate);
+                      if (statsPeriod === "week") {
+                        nextDate.setDate(nextDate.getDate() - 7);
+                      } else if (statsPeriod === "month") {
+                        nextDate.setMonth(nextDate.getMonth() - 1);
+                      } else if (statsPeriod === "year") {
+                        nextDate.setFullYear(nextDate.getFullYear() - 1);
+                      }
+                      setStatsReferenceDate(nextDate);
+                    }}
+                  >
+                    &lt;
+                  </button>
+
+                  <span
+                    style={{
+                      fontSize: "0.85rem",
+                      fontWeight: "700",
+                      color: "var(--color-gold)",
+                      padding: "0.2rem 0.5rem",
+                      background: "rgba(234, 179, 8, 0.1)",
+                      borderRadius: "6px",
+                      border: "1px solid rgba(234, 179, 8, 0.2)",
+                      minWidth: "120px",
+                      textAlign: "center",
+                    }}
+                  >
+                    {statsPeriodLabel}
+                  </span>
+
+                  <button
+                    type="button"
+                    title="次の期間へ"
+                    style={{
+                      background: "rgba(255, 255, 255, 0.05)",
+                      border: "1px solid var(--border-color)",
+                      color: "var(--text-primary)",
+                      cursor: "pointer",
+                      padding: "0.25rem 0.5rem",
+                      borderRadius: "6px",
+                      fontWeight: "bold",
+                      fontSize: "0.85rem",
+                    }}
+                    onClick={() => {
+                      const nextDate = new Date(statsReferenceDate);
+                      if (statsPeriod === "week") {
+                        nextDate.setDate(nextDate.getDate() + 7);
+                      } else if (statsPeriod === "month") {
+                        nextDate.setMonth(nextDate.getMonth() + 1);
+                      } else if (statsPeriod === "year") {
+                        nextDate.setFullYear(nextDate.getFullYear() + 1);
+                      }
+                      setStatsReferenceDate(nextDate);
+                    }}
+                  >
+                    &gt;
+                  </button>
+
+                  <button
+                    type="button"
+                    title="現在に戻す"
+                    style={{
+                      background: "rgba(234, 179, 8, 0.15)",
+                      border: "1px solid rgba(234, 179, 8, 0.35)",
+                      color: "var(--color-gold)",
+                      cursor: "pointer",
+                      padding: "0.25rem 0.5rem",
+                      borderRadius: "6px",
+                      fontSize: "0.75rem",
+                      fontWeight: "700",
+                      marginLeft: "0.25rem",
+                    }}
+                    onClick={() => setStatsReferenceDate(new Date())}
+                  >
+                    今
+                    {statsPeriod === "week"
+                      ? "週"
+                      : statsPeriod === "month"
+                        ? "月"
+                        : "年"}
+                  </button>
+                </>
+              ) : (
+                <span
+                  style={{
+                    fontSize: "0.8rem",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  全期間の集計データを表示中
+                </span>
+              )}
+
+              <span
+                style={{
+                  fontSize: "0.75rem",
+                  color: "var(--text-muted)",
+                  marginLeft: "0.5rem",
+                  paddingLeft: "0.5rem",
+                  borderLeft: "1px solid var(--border-color)",
+                }}
+              >
+                対象: {filteredStatsMemos.length}レース
+              </span>
+            </div>
+          </div>
+
           {/* Quick Statistics Panels */}
           <div className={styles.statsGrid}>
             <div className={`${styles.statCard} ${styles.statCardIncome} card`}>
@@ -1298,7 +1609,7 @@ export default function Home() {
                   <line x1="12" y1="1" x2="12" y2="23" />
                   <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
                 </svg>
-                通算収支
+                {periodLabelMap[statsPeriod].income}
               </div>
               <div
                 className={`${styles.statValue} ${totalIncome >= 0 ? styles.incomePositive : styles.incomeNegative}`}
@@ -1327,7 +1638,7 @@ export default function Home() {
                   <path d="M23 6l-9.5 9.5-5-5L1 18" />
                   <polyline points="17 6 23 6 23 12" />
                 </svg>
-                回収率
+                {periodLabelMap[statsPeriod].recovery}
               </div>
               <div className={`${styles.statValue} text-gold-gradient`}>
                 {recoveryRate}%
@@ -1351,7 +1662,7 @@ export default function Home() {
                   <circle cx="12" cy="12" r="6" />
                   <circle cx="12" cy="12" r="2" />
                 </svg>
-                的中率
+                {periodLabelMap[statsPeriod].hit}
               </div>
               <div
                 className={styles.statValue}
