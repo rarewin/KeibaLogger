@@ -727,8 +727,12 @@ export default function Home() {
   };
 
   const handleRemoveTicket = (index: number) => {
-    if (tickets.length === 1) return;
     setTickets(tickets.filter((_, i) => i !== index));
+    if (activeTicketGuiIndex === index) {
+      setActiveTicketGuiIndex(null);
+    } else if (activeTicketGuiIndex !== null && activeTicketGuiIndex > index) {
+      setActiveTicketGuiIndex(activeTicketGuiIndex - 1);
+    }
   };
 
   // Triggers updates for selections and auto-fills investment if combos are matched
@@ -1246,10 +1250,17 @@ export default function Home() {
       return;
     }
 
+    // Filter out tickets that have no selection specified
+    const validTickets = tickets.filter(
+      (t) => t.selection && t.selection.trim() !== "",
+    );
+
     const calculatedTickets =
-      scrapedPayouts && Object.keys(scrapedPayouts).length > 0
-        ? calculateTicketsPayout(tickets, scrapedPayouts)
-        : tickets;
+      validTickets.length > 0 &&
+      scrapedPayouts &&
+      Object.keys(scrapedPayouts).length > 0
+        ? calculateTicketsPayout(validTickets, scrapedPayouts)
+        : validTickets;
 
     const totalInvest = calculatedTickets.reduce(
       (sum, t) => sum + getTicketCost(t),
@@ -2153,18 +2164,71 @@ export default function Home() {
 
               {/* Dynamic Tickets List */}
               <div style={{ marginTop: "1.25rem" }}>
-                <label
+                <div
                   style={{
-                    display: "block",
-                    fontSize: "0.875rem",
-                    fontWeight: "600",
-                    color: "var(--text-secondary)",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
                     marginBottom: "0.5rem",
                   }}
                 >
-                  購入馬券
-                </label>
+                  <label
+                    style={{
+                      fontSize: "0.875rem",
+                      fontWeight: "600",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    購入馬券 (任意)
+                  </label>
+                  {tickets.length > 0 && (
+                    <button
+                      type="button"
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "var(--text-muted)",
+                        fontSize: "0.75rem",
+                        cursor: "pointer",
+                        textDecoration: "underline",
+                      }}
+                      onClick={() => {
+                        setTickets([]);
+                        setActiveTicketGuiIndex(null);
+                      }}
+                    >
+                      馬券をクリア (予想のみ保存)
+                    </button>
+                  )}
+                </div>
+
                 <div className={styles.ticketListContainer}>
+                  {tickets.length === 0 && (
+                    <div
+                      style={{
+                        padding: "1.2rem",
+                        textAlign: "center",
+                        background: "rgba(255, 255, 255, 0.02)",
+                        borderRadius: "8px",
+                        border: "1px dashed var(--border-color)",
+                        marginBottom: "0.75rem",
+                        color: "var(--text-muted)",
+                        fontSize: "0.85rem",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                      }}
+                    >
+                      <span>
+                        📝 馬券は未登録です（予想・メモのみ保存できます）
+                      </span>
+                      <span style={{ fontSize: "0.75rem", opacity: 0.7 }}>
+                        馬券を購入した場合は「馬券を追加」からいつでも登録できます
+                      </span>
+                    </div>
+                  )}
+
                   {tickets.map((ticket, index) => {
                     const expanded = expandTicketSelection(
                       ticket.type,
@@ -2233,7 +2297,6 @@ export default function Home() {
                                     e.target.value,
                                   )
                                 }
-                                required
                               />
                               {isCombo && (
                                 <span
@@ -2314,7 +2377,6 @@ export default function Home() {
                                   e.target.value,
                                 )
                               }
-                              required
                             />
                             {normalizeTicketType(ticket.type) === "応援馬券" && (
                               <span
@@ -2353,7 +2415,6 @@ export default function Home() {
                             type="button"
                             className={styles.removeTicketBtn}
                             onClick={() => handleRemoveTicket(index)}
-                            disabled={tickets.length === 1}
                             title="この馬券を削除"
                           >
                             <svg
@@ -3346,24 +3407,28 @@ export default function Home() {
                               className={`
                             ${styles.incomeValue} 
                             ${
-                              isPending
+                              memo.tickets.length === 0
                                 ? styles.incomeZero
-                                : diff > 0
-                                  ? styles.incomePositive
-                                  : diff < 0
-                                    ? styles.incomeNegative
-                                    : styles.incomeZero
+                                : isPending
+                                  ? styles.incomeZero
+                                  : diff > 0
+                                    ? styles.incomePositive
+                                    : diff < 0
+                                      ? styles.incomeNegative
+                                      : styles.incomeZero
                             }
                           `}
                             >
-                              {isPending
-                                ? "結果待ち"
-                                : `${diff >= 0 ? "+" : ""}${diff.toLocaleString()}円`}
+                              {memo.tickets.length === 0
+                                ? "予想のみ"
+                                : isPending
+                                  ? "結果待ち"
+                                  : `${diff >= 0 ? "+" : ""}${diff.toLocaleString()}円`}
                             </div>
                             <span className={styles.ticketTypeBadge}>
                               {memo.tickets.length > 0
                                 ? `${memo.tickets[0].type}他 ${memo.tickets.length}件`
-                                : "馬券なし"}
+                                : "馬券未登録"}
                             </span>
                           </div>
                         </div>
@@ -3584,8 +3649,8 @@ export default function Home() {
                               </div>
                             )}
 
-                            {/* Purchased Tickets Detail Table */}
-                            {memo.tickets.length > 0 && (
+                            {/* Purchased Tickets Detail Table or Empty Placeholder */}
+                            {memo.tickets.length > 0 ? (
                               <div style={{ marginTop: "0.25rem" }}>
                                 <div
                                   style={{
@@ -3659,22 +3724,34 @@ export default function Home() {
                                             </td>
                                             <td>
                                               {actualCost.toLocaleString()}円
-                                              {normalizeTicketType(t.type) === "応援馬券" && (() => {
-                                                const horseCount = Math.max(1, expanded.length);
-                                                const perBet = Math.round(t.investment / (horseCount * 2));
-                                                return (
-                                                  <span
-                                                    style={{
-                                                      fontSize: "0.7rem",
-                                                      opacity: 0.6,
-                                                      marginLeft: "0.2rem",
-                                                    }}
-                                                  >
-                                                    ({horseCount > 1 ? "各" : ""}単{perBet.toLocaleString()}円 / 複
-                                                    {perBet.toLocaleString()}円)
-                                                  </span>
-                                                );
-                                              })()}
+                                              {normalizeTicketType(t.type) ===
+                                                "応援馬券" &&
+                                                (() => {
+                                                  const horseCount = Math.max(
+                                                    1,
+                                                    expanded.length,
+                                                  );
+                                                  const perBet = Math.round(
+                                                    t.investment /
+                                                      (horseCount * 2),
+                                                  );
+                                                  return (
+                                                    <span
+                                                      style={{
+                                                        fontSize: "0.7rem",
+                                                        opacity: 0.6,
+                                                        marginLeft: "0.2rem",
+                                                      }}
+                                                    >
+                                                      ({horseCount > 1 ? "各" : ""}
+                                                      単
+                                                      {perBet.toLocaleString()}
+                                                      円 / 複
+                                                      {perBet.toLocaleString()}
+                                                      円)
+                                                    </span>
+                                                  );
+                                                })()}
                                             </td>
                                             <td>
                                               {t.payout.toLocaleString()}円
@@ -3704,6 +3781,46 @@ export default function Home() {
                                     </tbody>
                                   </table>
                                 </div>
+                              </div>
+                            ) : (
+                              <div
+                                style={{
+                                  marginTop: "0.5rem",
+                                  padding: "0.75rem 1rem",
+                                  background: "rgba(255, 255, 255, 0.02)",
+                                  borderRadius: "8px",
+                                  border: "1px dashed var(--border-color)",
+                                  fontSize: "0.8rem",
+                                  color: "var(--text-muted)",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  flexWrap: "wrap",
+                                  gap: "0.5rem",
+                                }}
+                              >
+                                <span>
+                                  📝 馬券は未登録です（予想・メモのみ）
+                                </span>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{
+                                    padding: "0.25rem 0.6rem",
+                                    fontSize: "0.75rem",
+                                    background: "rgba(59, 130, 246, 0.15)",
+                                    color: "var(--color-blue)",
+                                    border: "1px solid rgba(59, 130, 246, 0.3)",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleEdit(memo);
+                                  }}
+                                >
+                                  ＋ 馬券を追加して編集
+                                </button>
                               </div>
                             )}
 
