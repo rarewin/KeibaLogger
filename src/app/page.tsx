@@ -3754,13 +3754,16 @@ export default function Home() {
                                                 })()}
                                             </td>
                                             <td>
-                                              {t.payout.toLocaleString()}円
+                                              {isPending
+                                                ? "-"
+                                                : `${t.payout.toLocaleString()}円`}
                                             </td>
                                             <td
                                               style={{
                                                 fontWeight: "bold",
-                                                color:
-                                                  t.payout > 0
+                                                color: isPending
+                                                  ? "var(--text-secondary)"
+                                                  : t.payout > 0
                                                     ? "var(--color-emerald)"
                                                     : actualCost > 0 &&
                                                         t.payout === 0
@@ -3768,12 +3771,14 @@ export default function Home() {
                                                       : "var(--text-secondary)",
                                               }}
                                             >
-                                              {t.payout > 0
-                                                ? "的中 🎯"
-                                                : actualCost > 0 &&
-                                                    t.payout === 0
-                                                  ? "不的中 💸"
-                                                  : "返還/未確定"}
+                                              {isPending
+                                                ? "結果待ち ⏳"
+                                                : t.payout > 0
+                                                  ? "的中 🎯"
+                                                  : actualCost > 0 &&
+                                                      t.payout === 0
+                                                    ? "不的中 💸"
+                                                    : "返還/未確定"}
                                             </td>
                                           </tr>
                                         );
@@ -3843,7 +3848,10 @@ export default function Home() {
                                   総投資: {totalInvest.toLocaleString()}円
                                 </span>
                                 <span>
-                                  総払戻: {totalPay.toLocaleString()}円
+                                  総払戻:{" "}
+                                  {isPending
+                                    ? "未確定"
+                                    : `${totalPay.toLocaleString()}円`}
                                 </span>
                               </div>
                               <div
