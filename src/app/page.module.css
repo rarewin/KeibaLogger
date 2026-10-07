@@ -776,3 +776,165 @@
     gap: 0.75rem;
   }
 }
+
+/* Analytics Dashboard Styles */
+.analyticsContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+
+.analyticsHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.analyticsSubNav {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.75rem;
+}
+
+.analyticsSubBtn {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.analyticsSubBtn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.analyticsSubBtnActive {
+  background: var(--color-blue) !important;
+  color: #ffffff !important;
+  border-color: var(--color-blue) !important;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.analyticsControls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.analyticsSortGroup {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.analyticsSortBtn {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.analyticsSortBtnActive {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+
+.analyticsTableWrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  background: rgba(17, 24, 39, 0.4);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+
+.analyticsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.analyticsTable th,
+.analyticsTable td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.analyticsTable th {
+  background: rgba(0, 0, 0, 0.3);
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.analyticsTable tbody tr {
+  transition: background 0.15s ease;
+}
+
+.analyticsTable tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.analyticsTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.rateBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  font-weight: 700;
+  font-family: var(--font-outfit), sans-serif;
+  font-size: 0.85rem;
+}
+
+.rateBadgeHigh {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--color-emerald);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.rateBadgeMedium {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--color-gold);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.rateBadgeLow {
+  background: rgba(244, 63, 94, 0.1);
+  color: var(--color-rose);
+  border: 1px solid rgba(244, 63, 94, 0.2);
+}
+
+.rateBadgeNeutral {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+

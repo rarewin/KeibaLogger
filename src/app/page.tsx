@@ -66,7 +66,7 @@ function getPermutations(array: string[], size: number): string[][] {
   return result;
 }
 
-export function normalizeTicketType(type: string): string {
+function normalizeTicketType(type: string): string {
   const t = (type || "").trim();
   if (t === "三連複" || t === "３連複" || t === "3連複") return "3連複";
   if (t === "三連単" || t === "３連単" || t === "3連単") return "3連単";
@@ -89,7 +89,7 @@ function parseNumList(str: string): string[] {
 }
 
 // Expands racing notations (BOX, Nagashi, Formations) into discrete tickets (e.g. "3-6", "3-4")
-export function expandTicketSelection(
+function expandTicketSelection(
   type: string,
   selection: string,
 ): string[] {
@@ -253,7 +253,7 @@ export function expandTicketSelection(
 }
 
 // Calculate payouts and hit statuses for an array of tickets based on scraped dividends
-export function calculateTicketsPayout<
+function calculateTicketsPayout<
   T extends {
     type: string;
     selection: string;
@@ -446,9 +446,9 @@ const normalizeDate = (dateStr: string): string => {
   return dateStr;
 };
 
-export type StatsPeriod = "all" | "week" | "month" | "year";
+type StatsPeriod = "all" | "week" | "month" | "year";
 
-export function getWeekRange(d: Date): {
+function getWeekRange(d: Date): {
   startStr: string;
   endStr: string;
   label: string;
@@ -482,7 +482,7 @@ export function getWeekRange(d: Date): {
   return { startStr, endStr, label };
 }
 
-export function getMonthRange(d: Date): {
+function getMonthRange(d: Date): {
   startStr: string;
   endStr: string;
   label: string;
@@ -496,7 +496,7 @@ export function getMonthRange(d: Date): {
   return { startStr, endStr, label };
 }
 
-export function getYearRange(d: Date): {
+function getYearRange(d: Date): {
   startStr: string;
   endStr: string;
   label: string;
@@ -508,6 +508,90 @@ export function getYearRange(d: Date): {
   return { startStr, endStr, label };
 }
 
+// Classify race grade / class
+function classifyGrade(raceName: string): string {
+  const n = (raceName || "").toUpperCase();
+  if (
+    n.includes("G1") ||
+    n.includes("Ｇ１") ||
+    n.includes("GⅠ") ||
+    n.includes("JPN1") ||
+    n.includes("ＪＰＮ１")
+  )
+    return "G1";
+  if (
+    n.includes("G2") ||
+    n.includes("Ｇ２") ||
+    n.includes("GⅡ") ||
+    n.includes("JPN2") ||
+    n.includes("ＪＰＮ２")
+  )
+    return "G2";
+  if (
+    n.includes("G3") ||
+    n.includes("Ｇ３") ||
+    n.includes("GⅢ") ||
+    n.includes("JPN3") ||
+    n.includes("ＪＰＮ３")
+  )
+    return "G3";
+  if (n.includes("重賞")) return "重賞";
+  if (
+    n.includes("OP") ||
+    n.includes("オープン") ||
+    n.includes("リステッド") ||
+    n.includes("(L)")
+  )
+    return "オープン・L";
+  if (
+    n.includes("3勝クラス") ||
+    n.includes("３勝クラス") ||
+    n.includes("1600万")
+  )
+    return "3勝クラス";
+  if (
+    n.includes("2勝クラス") ||
+    n.includes("２勝クラス") ||
+    n.includes("1000万")
+  )
+    return "2勝クラス";
+  if (
+    n.includes("1勝クラス") ||
+    n.includes("１勝クラス") ||
+    n.includes("500万")
+  )
+    return "1勝クラス";
+  if (n.includes("新馬")) return "新馬戦";
+  if (n.includes("未勝利")) return "未勝利戦";
+  return "平場・その他";
+}
+
+// Extract Jockey name from prediction text or fetched horses
+function extractJockey(
+  str: string,
+  fetchedHorses?: ScrapedHorse[],
+  resultList?: RaceResult[],
+): string | null {
+  if (!str) return null;
+  const match = str.match(/\(([^)]+)\)/);
+  if (match) return match[1].trim();
+
+  // Try matching horse number
+  const horseNumMatch = str.match(/\b\d+\b/);
+  if (horseNumMatch) {
+    const numStr = horseNumMatch[0];
+    if (fetchedHorses && fetchedHorses.length > 0) {
+      const found = fetchedHorses.find((h) => String(h.umaban) === numStr);
+      if (found && found.jockey) return found.jockey.trim();
+    }
+    if (resultList && resultList.length > 0) {
+      const found = resultList.find((r) => String(r.horseNumber) === numStr);
+      if (found && found.jockey) return found.jockey.trim();
+    }
+  }
+  return null;
+}
+
 export default function Home() {
   const [memos, setMemos] = useState<MemoData[]>([]);
   const [activeMemoId, setActiveMemoId] = useState<string | null>(null);
@@ -516,12 +600,22 @@ export default function Home() {
   const [fetchedHorses, setFetchedHorses] = useState<ScrapedHorse[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [netkeibaUrl, setNetkeibaUrl] = useState("");
-  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+  const [viewMode, setViewMode] = useState<"list" | "calendar" | "analytics">(
+    "list",
+  );
   const [preEditViewMode, setPreEditViewMode] = useState<
-    "list" | "calendar" | null
+    "list" | "calendar" | "analytics" | null
   >(null);
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
+
+  // Analytics sub-tab & sorting states
+  const [analyticsTab, setAnalyticsTab] = useState<
+    "track" | "jockey" | "ticketType" | "grade" | "prediction"
+  >("track");
+  const [analyticsSortBy, setAnalyticsSortBy] = useState<
+    "recoveryRate" | "races" | "income"
+  >("recoveryRate");
 
   // Active GUI index and select states for wagers tickets
   const [activeTicketGuiIndex, setActiveTicketGuiIndex] = useState<
@@ -712,6 +806,247 @@ export default function Home() {
     month: { income: "月間収支", recovery: "月間回収率", hit: "月間的中率" },
     year: { income: "年間収支", recovery: "年間回収率", hit: "年間的中率" },
   };
+
+  // Aggregated Analytics Computation
+  const analyticsData = useMemo(() => {
+    // 1. TRACK / COURSE STATS
+    const trackMap: Record<
+      string,
+      { track: string; races: number; hits: number; invest: number; payout: number }
+    > = {};
+
+    // 2. TICKET TYPE STATS
+    const typeMap: Record<
+      string,
+      { type: string; count: number; hits: number; invest: number; payout: number }
+    > = {};
+
+    // 3. JOCKEY STATS (Honmei Jockey)
+    const jockeyMap: Record<
+      string,
+      {
+        jockey: string;
+        races: number;
+        hits: number;
+        invest: number;
+        payout: number;
+        wins: number;
+        top2: number;
+        top3: number;
+      }
+    > = {};
+
+    // 4. GRADE STATS
+    const gradeMap: Record<
+      string,
+      { grade: string; races: number; hits: number; invest: number; payout: number }
+    > = {};
+
+    // 5. PREDICTION MARKS STATS
+    const markStats = {
+      honmei: { mark: "◎ 本命", count: 0, win: 0, top2: 0, top3: 0, out: 0 },
+      taiko: { mark: "◯ 対抗", count: 0, win: 0, top2: 0, top3: 0, out: 0 },
+      anago: { mark: "▲ 穴", count: 0, win: 0, top2: 0, top3: 0, out: 0 },
+      renge: { mark: "△ 連下", count: 0, win: 0, top2: 0, top3: 0, out: 0 },
+    };
+
+    for (const m of filteredStatsMemos) {
+      const tInv = m.tickets.reduce((sum, t) => sum + getTicketCost(t), 0);
+      const tPay = m.tickets.reduce((sum, t) => sum + t.payout, 0);
+      const isHit = m.result === "hit";
+
+      // 1. Track
+      const trk = m.track || "その他";
+      if (!trackMap[trk]) {
+        trackMap[trk] = { track: trk, races: 0, hits: 0, invest: 0, payout: 0 };
+      }
+      trackMap[trk].races += 1;
+      trackMap[trk].invest += tInv;
+      trackMap[trk].payout += tPay;
+      if (isHit) trackMap[trk].hits += 1;
+
+      // 2. Ticket Types
+      for (const t of m.tickets) {
+        const normType = normalizeTicketType(t.type);
+        if (!typeMap[normType]) {
+          typeMap[normType] = {
+            type: normType,
+            count: 0,
+            hits: 0,
+            invest: 0,
+            payout: 0,
+          };
+        }
+        typeMap[normType].count += 1;
+        typeMap[normType].invest += getTicketCost(t);
+        typeMap[normType].payout += t.payout;
+        if (t.isHit || t.payout > 0) typeMap[normType].hits += 1;
+      }
+
+      // 3. Jockey (Honmei)
+      const j = extractJockey(m.prediction.honmei, m.fetchedHorses, m.resultList);
+      if (j) {
+        if (!jockeyMap[j]) {
+          jockeyMap[j] = {
+            jockey: j,
+            races: 0,
+            hits: 0,
+            invest: 0,
+            payout: 0,
+            wins: 0,
+            top2: 0,
+            top3: 0,
+          };
+        }
+        jockeyMap[j].races += 1;
+        jockeyMap[j].invest += tInv;
+        jockeyMap[j].payout += tPay;
+        if (isHit) jockeyMap[j].hits += 1;
+
+        if (m.resultList && m.resultList.length > 0) {
+          const horseNumMatch = m.prediction.honmei.match(/\b\d+\b/);
+          if (horseNumMatch) {
+            const num = horseNumMatch[0];
+            const found = m.resultList.find((r) => String(r.horseNumber) === num);
+            if (found) {
+              if (found.rank === 1) jockeyMap[j].wins += 1;
+              if (found.rank <= 2) jockeyMap[j].top2 += 1;
+              if (found.rank <= 3) jockeyMap[j].top3 += 1;
+            }
+          }
+        }
+      }
+
+      // 4. Grade
+      const g = classifyGrade(m.raceName);
+      if (!gradeMap[g]) {
+        gradeMap[g] = { grade: g, races: 0, hits: 0, invest: 0, payout: 0 };
+      }
+      gradeMap[g].races += 1;
+      gradeMap[g].invest += tInv;
+      gradeMap[g].payout += tPay;
+      if (isHit) gradeMap[g].hits += 1;
+
+      // 5. Prediction Marks
+      if (m.resultList && m.resultList.length > 0) {
+        const top1Num = m.resultList.find((r) => r.rank === 1)?.horseNumber;
+        const top2Nums = m.resultList
+          .filter((r) => r.rank <= 2)
+          .map((r) => String(r.horseNumber));
+        const top3Nums = m.resultList
+          .filter((r) => r.rank <= 3)
+          .map((r) => String(r.horseNumber));
+
+        const markEntries: {
+          key: "honmei" | "taiko" | "anago" | "renge";
+          str: string;
+        }[] = [
+          { key: "honmei", str: m.prediction.honmei },
+          { key: "taiko", str: m.prediction.taiko },
+          { key: "anago", str: m.prediction.anago },
+          { key: "renge", str: m.prediction.renge },
+        ];
+
+        for (const { key, str } of markEntries) {
+          if (!str) continue;
+          const matches = str.match(/\b\d+\b/g) || [];
+          for (const num of Array.from(new Set(matches))) {
+            markStats[key].count += 1;
+            if (num === String(top1Num)) markStats[key].win += 1;
+            if (top2Nums.includes(num)) markStats[key].top2 += 1;
+            if (top3Nums.includes(num)) markStats[key].top3 += 1;
+            if (!top3Nums.includes(num)) markStats[key].out += 1;
+          }
+        }
+      }
+    }
+
+    // Sort function helper
+    const sortList = <
+      T extends { recoveryRate: number; invest: number; income: number },
+    >(
+      list: T[],
+      countKey: keyof T,
+    ) => {
+      return [...list].sort((a, b) => {
+        if (analyticsSortBy === "recoveryRate") {
+          return (
+            b.recoveryRate - a.recoveryRate ||
+            (b[countKey] as number) - (a[countKey] as number)
+          );
+        }
+        if (analyticsSortBy === "races") {
+          return (
+            (b[countKey] as number) - (a[countKey] as number) ||
+            b.recoveryRate - a.recoveryRate
+          );
+        }
+        return b.income - a.income || b.recoveryRate - a.recoveryRate;
+      });
+    };
+
+    const trackList = sortList(
+      Object.values(trackMap).map((t) => ({
+        ...t,
+        income: t.payout - t.invest,
+        recoveryRate:
+          t.invest > 0 ? Math.round((t.payout / t.invest) * 100) : 0,
+        hitRate: t.races > 0 ? Math.round((t.hits / t.races) * 100) : 0,
+      })),
+      "races",
+    );
+
+    const typeList = sortList(
+      Object.values(typeMap).map((t) => ({
+        ...t,
+        income: t.payout - t.invest,
+        recoveryRate:
+          t.invest > 0 ? Math.round((t.payout / t.invest) * 100) : 0,
+        hitRate: t.count > 0 ? Math.round((t.hits / t.count) * 100) : 0,
+      })),
+      "count",
+    );
+
+    const jockeyList = sortList(
+      Object.values(jockeyMap).map((j) => ({
+        ...j,
+        income: j.payout - j.invest,
+        recoveryRate:
+          j.invest > 0 ? Math.round((j.payout / j.invest) * 100) : 0,
+        hitRate: j.races > 0 ? Math.round((j.hits / j.races) * 100) : 0,
+        winRate: j.races > 0 ? Math.round((j.wins / j.races) * 100) : 0,
+        top2Rate: j.races > 0 ? Math.round((j.top2 / j.races) * 100) : 0,
+        top3Rate: j.races > 0 ? Math.round((j.top3 / j.races) * 100) : 0,
+      })),
+      "races",
+    );
+
+    const gradeList = sortList(
+      Object.values(gradeMap).map((g) => ({
+        ...g,
+        income: g.payout - g.invest,
+        recoveryRate:
+          g.invest > 0 ? Math.round((g.payout / g.invest) * 100) : 0,
+        hitRate: g.races > 0 ? Math.round((g.hits / g.races) * 100) : 0,
+      })),
+      "races",
+    );
+
+    const predictionList = Object.values(markStats).map((s) => ({
+      ...s,
+      winRate: s.count > 0 ? Math.round((s.win / s.count) * 100) : 0,
+      top2Rate: s.count > 0 ? Math.round((s.top2 / s.count) * 100) : 0,
+      top3Rate: s.count > 0 ? Math.round((s.top3 / s.count) * 100) : 0,
+    }));
+
+    return {
+      trackList,
+      typeList,
+      jockeyList,
+      gradeList,
+      predictionList,
+    };
+  }, [filteredStatsMemos, analyticsSortBy]);
 
   // Toggle Accordion Detail
   const toggleDetail = (id: string) => {
@@ -1829,24 +2164,63 @@ export default function Home() {
                     value={track}
                     onChange={(e) => setTrack(e.target.value)}
                   >
-                    {[
-                      "東京",
-                      "中山",
-                      "京都",
-                      "阪神",
-                      "新潟",
-                      "中京",
-                      "小倉",
-                      "福島",
-                      "函館",
-                      "札幌",
-                      "地方",
-                      "海外",
-                    ].map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
+                    <optgroup label="中央競馬 (JRA)">
+                      {[
+                        "東京",
+                        "中山",
+                        "京都",
+                        "阪神",
+                        "新潟",
+                        "中京",
+                        "小倉",
+                        "福島",
+                        "函館",
+                        "札幌",
+                      ].map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="地方競馬 (NAR)">
+                      {[
+                        "大井",
+                        "川崎",
+                        "船橋",
+                        "浦和",
+                        "門別",
+                        "盛岡",
+                        "水沢",
+                        "金沢",
+                        "笠松",
+                        "名古屋",
+                        "園田",
+                        "姫路",
+                        "高知",
+                        "佐賀",
+                        "ばんえい帯広",
+                        "地方(他)",
+                      ].map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="海外・その他">
+                      {[
+                        "ロンシャン",
+                        "デルマー",
+                        "サンタアニタ",
+                        "メイダン",
+                        "シャティン",
+                        "海外(他)",
+                        "その他",
+                      ].map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </optgroup>
                   </select>
                 </div>
               </div>
@@ -3082,6 +3456,32 @@ export default function Home() {
                 >
                   カレンダー
                 </button>
+                <button
+                  type="button"
+                  style={{
+                    padding: "0.35rem 0.75rem",
+                    fontSize: "0.75rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    background:
+                      viewMode === "analytics"
+                        ? "var(--color-blue)"
+                        : "transparent",
+                    color:
+                      viewMode === "analytics"
+                        ? "#ffffff"
+                        : "var(--text-secondary)",
+                    cursor: "pointer",
+                    fontWeight: "600",
+                    transition: "all 0.2s ease",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.25rem",
+                  }}
+                  onClick={() => setViewMode("analytics")}
+                >
+                  <span>📊 分析</span>
+                </button>
               </div>
             </div>
 
@@ -3288,64 +3688,447 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Title helper for calendar-filtered logs view */}
-              {viewMode === "calendar" && selectedDateStr && (
-                <div
-                  style={{
-                    fontSize: "0.85rem",
-                    fontWeight: "700",
-                    marginBottom: "0.75rem",
-                    color: "var(--color-blue)",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <span>
-                    📅 {selectedDateStr} の記録 (
-                    {
-                      memos.filter(
-                        (m) =>
-                          normalizeDate(m.date) ===
-                          normalizeDate(selectedDateStr),
-                      ).length
-                    }
-                    件)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDateStr(null)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "var(--text-secondary)",
-                      fontSize: "0.7rem",
-                      cursor: "pointer",
-                    }}
-                  >
-                    選択解除
-                  </button>
-                </div>
-              )}
+              {/* Analytics View */}
+              {viewMode === "analytics" ? (
+                <div className={styles.analyticsContainer}>
+                  {/* Analytics Sub Navigation Tabs */}
+                  <div className={styles.analyticsHeader}>
+                    <div className={styles.analyticsSubNav}>
+                      <button
+                        type="button"
+                        className={`${styles.analyticsSubBtn} ${analyticsTab === "track" ? styles.analyticsSubBtnActive : ""}`}
+                        onClick={() => setAnalyticsTab("track")}
+                      >
+                        <span>🏟️</span> コース・競馬場
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.analyticsSubBtn} ${analyticsTab === "jockey" ? styles.analyticsSubBtnActive : ""}`}
+                        onClick={() => setAnalyticsTab("jockey")}
+                      >
+                        <span>🏇</span> 騎手 (本命◎)
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.analyticsSubBtn} ${analyticsTab === "ticketType" ? styles.analyticsSubBtnActive : ""}`}
+                        onClick={() => setAnalyticsTab("ticketType")}
+                      >
+                        <span>🎫</span> 券種別
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.analyticsSubBtn} ${analyticsTab === "grade" ? styles.analyticsSubBtnActive : ""}`}
+                        onClick={() => setAnalyticsTab("grade")}
+                      >
+                        <span>🏆</span> グレード別
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.analyticsSubBtn} ${analyticsTab === "prediction" ? styles.analyticsSubBtnActive : ""}`}
+                        onClick={() => setAnalyticsTab("prediction")}
+                      >
+                        <span>🎯</span> 予想印別
+                      </button>
+                    </div>
 
-              {viewMode === "calendar" && !selectedDateStr && (
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "1.5rem 1rem",
-                    color: "var(--text-muted)",
-                    fontSize: "0.8rem",
-                    border: "1px dashed var(--border-color)",
-                    borderRadius: "8px",
-                    background: "rgba(255, 255, 255, 0.01)",
-                  }}
-                >
-                  <p>
-                    📅
-                    カレンダーの日付を選択すると、その日のログがここに表示されます。
-                  </p>
+                    <div className={styles.analyticsControls}>
+                      <div style={{ color: "var(--text-secondary)", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                        <span>📊 集計期間: </span>
+                        <strong style={{ color: "var(--color-blue)" }}>{statsPeriodLabel}</strong>
+                        <span>({filteredStatsMemos.length}レース)</span>
+                      </div>
+
+                      {analyticsTab !== "prediction" && (
+                        <div className={styles.analyticsSortGroup}>
+                          <span style={{ color: "var(--text-muted)", fontSize: "0.7rem", marginRight: "0.2rem" }}>
+                            並び替え:
+                          </span>
+                          <button
+                            type="button"
+                            className={`${styles.analyticsSortBtn} ${analyticsSortBy === "recoveryRate" ? styles.analyticsSortBtnActive : ""}`}
+                            onClick={() => setAnalyticsSortBy("recoveryRate")}
+                          >
+                            📈 回収率順
+                          </button>
+                          <button
+                            type="button"
+                            className={`${styles.analyticsSortBtn} ${analyticsSortBy === "races" ? styles.analyticsSortBtnActive : ""}`}
+                            onClick={() => setAnalyticsSortBy("races")}
+                          >
+                            🔢 {analyticsTab === "ticketType" ? "購入点数順" : "レース数順"}
+                          </button>
+                          <button
+                            type="button"
+                            className={`${styles.analyticsSortBtn} ${analyticsSortBy === "income" ? styles.analyticsSortBtnActive : ""}`}
+                            onClick={() => setAnalyticsSortBy("income")}
+                          >
+                            💰 収支順
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 1. Track / Course Stats */}
+                  {analyticsTab === "track" && (
+                    <div className={styles.analyticsTableWrapper}>
+                      {analyticsData.trackList.length === 0 ? (
+                        <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                          該当する期間のレース記録がありません。
+                        </div>
+                      ) : (
+                        <table className={styles.analyticsTable}>
+                          <thead>
+                            <tr>
+                              <th>競馬場・コース</th>
+                              <th style={{ textAlign: "right" }}>レース数</th>
+                              <th style={{ textAlign: "right" }}>的中 (率)</th>
+                              <th style={{ textAlign: "right" }}>投資額</th>
+                              <th style={{ textAlign: "right" }}>払戻額</th>
+                              <th style={{ textAlign: "right" }}>収支</th>
+                              <th style={{ textAlign: "right" }}>回収率</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {analyticsData.trackList.map((item) => {
+                              const isProfitable = item.income > 0;
+                              const isLoss = item.income < 0;
+                              const badgeClass = item.recoveryRate >= 100 ? styles.rateBadgeHigh : item.recoveryRate >= 75 ? styles.rateBadgeMedium : styles.rateBadgeLow;
+                              return (
+                                <tr key={item.track}>
+                                  <td style={{ fontWeight: 600 }}>{item.track}</td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>{item.races}R</td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.hits} ({item.hitRate}%)
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.invest.toLocaleString()}円
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.payout.toLocaleString()}円
+                                  </td>
+                                  <td style={{
+                                    textAlign: "right",
+                                    fontWeight: 700,
+                                    fontFamily: "var(--font-outfit)",
+                                    color: isProfitable ? "var(--color-emerald)" : isLoss ? "var(--color-rose)" : "var(--text-secondary)"
+                                  }}>
+                                    {item.income > 0 ? `+${item.income.toLocaleString()}` : `${item.income.toLocaleString()}`}円
+                                  </td>
+                                  <td style={{ textAlign: "right" }}>
+                                    <span className={`${styles.rateBadge} ${badgeClass}`}>
+                                      {item.recoveryRate}%
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 2. Jockey Stats */}
+                  {analyticsTab === "jockey" && (
+                    <div className={styles.analyticsTableWrapper}>
+                      {analyticsData.jockeyList.length === 0 ? (
+                        <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                          本命◎に騎手情報が含まれるレース記録がありません。
+                          <div style={{ fontSize: "0.75rem", marginTop: "0.5rem", color: "var(--text-secondary)" }}>
+                            ※ netkeibaから出走表を取得するか、本命に「1(川田)」のように入力すると集計されます。
+                          </div>
+                        </div>
+                      ) : (
+                        <table className={styles.analyticsTable}>
+                          <thead>
+                            <tr>
+                              <th>騎手名 (本命◎)</th>
+                              <th style={{ textAlign: "right" }}>レース数</th>
+                              <th style={{ textAlign: "right" }}>的中 (率)</th>
+                              <th style={{ textAlign: "right" }}>勝率 (1着)</th>
+                              <th style={{ textAlign: "right" }}>連対率 (1-2着)</th>
+                              <th style={{ textAlign: "right" }}>複勝率 (1-3着)</th>
+                              <th style={{ textAlign: "right" }}>投資額</th>
+                              <th style={{ textAlign: "right" }}>払戻額</th>
+                              <th style={{ textAlign: "right" }}>収支</th>
+                              <th style={{ textAlign: "right" }}>回収率</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {analyticsData.jockeyList.map((item) => {
+                              const isProfitable = item.income > 0;
+                              const isLoss = item.income < 0;
+                              const badgeClass = item.recoveryRate >= 100 ? styles.rateBadgeHigh : item.recoveryRate >= 75 ? styles.rateBadgeMedium : styles.rateBadgeLow;
+                              return (
+                                <tr key={item.jockey}>
+                                  <td style={{ fontWeight: 600 }}>{item.jockey}</td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>{item.races}R</td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.hits} ({item.hitRate}%)
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.winRate}% ({item.wins})
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.top2Rate}% ({item.top2})
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.top3Rate}% ({item.top3})
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.invest.toLocaleString()}円
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.payout.toLocaleString()}円
+                                  </td>
+                                  <td style={{
+                                    textAlign: "right",
+                                    fontWeight: 700,
+                                    fontFamily: "var(--font-outfit)",
+                                    color: isProfitable ? "var(--color-emerald)" : isLoss ? "var(--color-rose)" : "var(--text-secondary)"
+                                  }}>
+                                    {item.income > 0 ? `+${item.income.toLocaleString()}` : `${item.income.toLocaleString()}`}円
+                                  </td>
+                                  <td style={{ textAlign: "right" }}>
+                                    <span className={`${styles.rateBadge} ${badgeClass}`}>
+                                      {item.recoveryRate}%
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 3. Ticket Type Stats */}
+                  {analyticsTab === "ticketType" && (
+                    <div className={styles.analyticsTableWrapper}>
+                      {analyticsData.typeList.length === 0 ? (
+                        <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                          該当する期間の馬券記録がありません。
+                        </div>
+                      ) : (
+                        <table className={styles.analyticsTable}>
+                          <thead>
+                            <tr>
+                              <th>券種</th>
+                              <th style={{ textAlign: "right" }}>購入点数</th>
+                              <th style={{ textAlign: "right" }}>的中数 (的中率)</th>
+                              <th style={{ textAlign: "right" }}>投資額</th>
+                              <th style={{ textAlign: "right" }}>払戻額</th>
+                              <th style={{ textAlign: "right" }}>収支</th>
+                              <th style={{ textAlign: "right" }}>回収率</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {analyticsData.typeList.map((item) => {
+                              const isProfitable = item.income > 0;
+                              const isLoss = item.income < 0;
+                              const badgeClass = item.recoveryRate >= 100 ? styles.rateBadgeHigh : item.recoveryRate >= 75 ? styles.rateBadgeMedium : styles.rateBadgeLow;
+                              return (
+                                <tr key={item.type}>
+                                  <td style={{ fontWeight: 600 }}>{item.type}</td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>{item.count}点</td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.hits} ({item.hitRate}%)
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.invest.toLocaleString()}円
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.payout.toLocaleString()}円
+                                  </td>
+                                  <td style={{
+                                    textAlign: "right",
+                                    fontWeight: 700,
+                                    fontFamily: "var(--font-outfit)",
+                                    color: isProfitable ? "var(--color-emerald)" : isLoss ? "var(--color-rose)" : "var(--text-secondary)"
+                                  }}>
+                                    {item.income > 0 ? `+${item.income.toLocaleString()}` : `${item.income.toLocaleString()}`}円
+                                  </td>
+                                  <td style={{ textAlign: "right" }}>
+                                    <span className={`${styles.rateBadge} ${badgeClass}`}>
+                                      {item.recoveryRate}%
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 4. Grade Stats */}
+                  {analyticsTab === "grade" && (
+                    <div className={styles.analyticsTableWrapper}>
+                      {analyticsData.gradeList.length === 0 ? (
+                        <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                          該当する期間のレース記録がありません。
+                        </div>
+                      ) : (
+                        <table className={styles.analyticsTable}>
+                          <thead>
+                            <tr>
+                              <th>グレード・クラス</th>
+                              <th style={{ textAlign: "right" }}>レース数</th>
+                              <th style={{ textAlign: "right" }}>的中 (率)</th>
+                              <th style={{ textAlign: "right" }}>投資額</th>
+                              <th style={{ textAlign: "right" }}>払戻額</th>
+                              <th style={{ textAlign: "right" }}>収支</th>
+                              <th style={{ textAlign: "right" }}>回収率</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {analyticsData.gradeList.map((item) => {
+                              const isProfitable = item.income > 0;
+                              const isLoss = item.income < 0;
+                              const badgeClass = item.recoveryRate >= 100 ? styles.rateBadgeHigh : item.recoveryRate >= 75 ? styles.rateBadgeMedium : styles.rateBadgeLow;
+                              return (
+                                <tr key={item.grade}>
+                                  <td style={{ fontWeight: 600 }}>{item.grade}</td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>{item.races}R</td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.hits} ({item.hitRate}%)
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.invest.toLocaleString()}円
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>
+                                    {item.payout.toLocaleString()}円
+                                  </td>
+                                  <td style={{
+                                    textAlign: "right",
+                                    fontWeight: 700,
+                                    fontFamily: "var(--font-outfit)",
+                                    color: isProfitable ? "var(--color-emerald)" : isLoss ? "var(--color-rose)" : "var(--text-secondary)"
+                                  }}>
+                                    {item.income > 0 ? `+${item.income.toLocaleString()}` : `${item.income.toLocaleString()}`}円
+                                  </td>
+                                  <td style={{ textAlign: "right" }}>
+                                    <span className={`${styles.rateBadge} ${badgeClass}`}>
+                                      {item.recoveryRate}%
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 5. Prediction Marks Stats */}
+                  {analyticsTab === "prediction" && (
+                    <div className={styles.analyticsTableWrapper}>
+                      <table className={styles.analyticsTable}>
+                        <thead>
+                          <tr>
+                            <th>予想印</th>
+                            <th style={{ textAlign: "right" }}>指名数</th>
+                            <th style={{ textAlign: "right" }}>1着</th>
+                            <th style={{ textAlign: "right" }}>2着</th>
+                            <th style={{ textAlign: "right" }}>3着</th>
+                            <th style={{ textAlign: "right" }}>着外</th>
+                            <th style={{ textAlign: "right" }}>勝率</th>
+                            <th style={{ textAlign: "right" }}>連対率</th>
+                            <th style={{ textAlign: "right" }}>複勝率</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {analyticsData.predictionList.map((item) => {
+                            return (
+                              <tr key={item.mark}>
+                                <td style={{ fontWeight: 700 }}>{item.mark}</td>
+                                <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)" }}>{item.count}頭</td>
+                                <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)", color: "var(--color-gold)", fontWeight: 600 }}>{item.win}</td>
+                                <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)", color: "var(--color-blue)", fontWeight: 600 }}>{item.top2 - item.win}</td>
+                                <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)", color: "var(--color-emerald)", fontWeight: 600 }}>{item.top3 - item.top2}</td>
+                                <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)", color: "var(--text-muted)" }}>{item.out}</td>
+                                <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)", fontWeight: 600 }}>{item.winRate}%</td>
+                                <td style={{ textAlign: "right", fontFamily: "var(--font-outfit)", fontWeight: 600 }}>{item.top2Rate}%</td>
+                                <td style={{ textAlign: "right" }}>
+                                  <span className={`${styles.rateBadge} ${item.top3Rate >= 50 ? styles.rateBadgeHigh : item.top3Rate >= 30 ? styles.rateBadgeMedium : styles.rateBadgeNeutral}`}>
+                                    {item.top3Rate}%
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      <div style={{ padding: "0.75rem 1rem", fontSize: "0.75rem", color: "var(--text-muted)", borderTop: "1px solid var(--border-color)" }}>
+                        💡 レース結果（着順データ）が保存または同期されているレースの予想印を集計しています。
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              ) : (
+                <>
+                  {/* Title helper for calendar-filtered logs view */}
+                  {viewMode === "calendar" && selectedDateStr && (
+                    <div
+                      style={{
+                        fontSize: "0.85rem",
+                        fontWeight: "700",
+                        marginBottom: "0.75rem",
+                        color: "var(--color-blue)",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span>
+                        📅 {selectedDateStr} の記録 (
+                        {
+                          memos.filter(
+                            (m) =>
+                              normalizeDate(m.date) ===
+                              normalizeDate(selectedDateStr),
+                          ).length
+                        }
+                        件)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDateStr(null)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "var(--text-secondary)",
+                          fontSize: "0.7rem",
+                          cursor: "pointer",
+                        }}
+                      >
+                        選択解除
+                      </button>
+                    </div>
+                  )}
+
+                  {viewMode === "calendar" && !selectedDateStr && (
+                    <div
+                      style={{
+                        textAlign: "center",
+                        padding: "1.5rem 1rem",
+                        color: "var(--text-muted)",
+                        fontSize: "0.8rem",
+                        border: "1px dashed var(--border-color)",
+                        borderRadius: "8px",
+                        background: "rgba(255, 255, 255, 0.01)",
+                      }}
+                    >
+                      <p>
+                        📅
+                        カレンダーの日付を選択すると、その日のログがここに表示されます。
+                      </p>
+                    </div>
+                  )}
 
               {memos.length === 0 ? (
                 <div className={styles.noMemos}>
@@ -3910,6 +4693,8 @@ export default function Home() {
                       </div>
                     );
                   })
+              )}
+                </>
               )}
             </div>
           </div>
