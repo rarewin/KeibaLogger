@@ -2159,7 +2159,7 @@ export default function Home() {
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} noValidate>
               {editingId && (
                 <div
                   className={styles.editingBanner}
@@ -2843,6 +2843,8 @@ export default function Home() {
                           >
                             <input
                               type="number"
+                              step="100"
+                              min="0"
                               className="input-control"
                               style={{ padding: "0.45rem", width: "100%" }}
                               placeholder="投資額"
@@ -2866,6 +2868,7 @@ export default function Home() {
                                   padding: "0.1rem 0.25rem",
                                   borderRadius: "4px",
                                   fontWeight: "bold",
+                                  whiteSpace: "nowrap",
                                 }}
                               >
                                 単+複 (計{(ticket.investment || 0).toLocaleString()}円)
@@ -2875,6 +2878,8 @@ export default function Home() {
 
                           <input
                             type="number"
+                            step="100"
+                            min="0"
                             className="input-control"
                             style={{ padding: "0.45rem" }}
                             placeholder="払戻額"
