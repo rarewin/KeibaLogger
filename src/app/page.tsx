@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   getMemos,
   saveMemo,
@@ -599,6 +599,7 @@ export default function Home() {
   const [isFetching, setIsFetching] = useState(false);
   const [fetchedHorses, setFetchedHorses] = useState<ScrapedHorse[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const editingIdRef = useRef<string | null>(null);
   const [netkeibaUrl, setNetkeibaUrl] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "calendar" | "analytics">(
     "list",
@@ -1055,9 +1056,16 @@ export default function Home() {
 
   // Dynamic ticket row actions (Default investment is now 100 Yen)
   const handleAddTicket = () => {
+    const honmeiNum = honmei ? honmei.match(/^\s*(\d+)/)?.[1] || "" : "";
     setTickets([
       ...tickets,
-      { type: "単勝", selection: "", investment: 100, payout: 0, isHit: false },
+      {
+        type: "単勝",
+        selection: honmeiNum,
+        investment: 100,
+        payout: 0,
+        isHit: false,
+      },
     ]);
   };
 
@@ -1076,35 +1084,35 @@ export default function Home() {
     key: keyof Omit<TicketData, "id">,
     value: any,
   ) => {
-    const newTickets = [...tickets];
-
-    if (key === "selection") {
-      newTickets[index].selection = value;
-      // Auto-compute combinations count and fill total investment (200 Yen per horse for 応援馬券, 100 Yen per combo for others)
-      const combos = expandTicketSelection(newTickets[index].type, value);
-      if (combos.length > 0) {
-        const unitCost =
-          normalizeTicketType(newTickets[index].type) === "応援馬券"
-            ? 200
-            : 100;
-        newTickets[index].investment = unitCost * combos.length;
+    const newTickets = tickets.map((t, i) => {
+      if (i !== index) return t;
+      const updated = { ...t };
+      if (key === "selection") {
+        updated.selection = value;
+        // Auto-compute combinations count and fill total investment (200 Yen per horse for 応援馬券, 100 Yen per combo for others)
+        const combos = expandTicketSelection(updated.type, value);
+        if (combos.length > 0) {
+          const unitCost =
+            normalizeTicketType(updated.type) === "応援馬券"
+              ? 200
+              : 100;
+          updated.investment = unitCost * combos.length;
+        }
+      } else if (key === "type") {
+        updated.type = value;
+        // Re-compute combos count on type change
+        const combos = expandTicketSelection(value, updated.selection);
+        if (combos.length > 0) {
+          const unitCost =
+            normalizeTicketType(value) === "応援馬券" ? 200 : 100;
+          updated.investment = unitCost * combos.length;
+        }
+      } else {
+        (updated as any)[key] =
+          key === "investment" || key === "payout" ? Number(value) || 0 : value;
       }
-    } else if (key === "type") {
-      newTickets[index].type = value;
-      // Re-compute combos count on type change
-      const combos = expandTicketSelection(value, newTickets[index].selection);
-      if (combos.length > 0) {
-        const unitCost =
-          normalizeTicketType(value) === "応援馬券" ? 200 : 100;
-        newTickets[index].investment = unitCost * combos.length;
-      }
-    } else {
-      newTickets[index] = {
-        ...newTickets[index],
-        [key]:
-          key === "investment" || key === "payout" ? Number(value) || 0 : value,
-      };
-    }
+      return updated;
+    });
 
     if (scrapedPayouts && Object.keys(scrapedPayouts).length > 0) {
       setTickets(calculateTicketsPayout(newTickets, scrapedPayouts));
@@ -1423,10 +1431,11 @@ export default function Home() {
   };
 
   // Load saved memo into form for editing
-  const handleEdit = (memo: MemoData) => {
+  const handleEdit = (memo: MemoData, autoAddTicket = false) => {
     setPreEditViewMode(viewMode);
     setViewMode("list");
     setEditingId(memo.id || null);
+    editingIdRef.current = memo.id || null;
     setDate(memo.date);
     setTrack(memo.track);
     setRaceNumber(memo.raceNumber);
@@ -1436,16 +1445,35 @@ export default function Home() {
     setAnago(memo.prediction.anago);
     setRenge(memo.prediction.renge);
     setMemoText(memo.memoText);
-    setTickets(
-      memo.tickets.map((t) => ({
-        type: t.type,
-        selection: t.selection,
-        investment: t.investment,
-        payout: t.payout,
-        isHit: t.isHit,
-      })),
-    );
+
+    const honmeiNum = memo.prediction.honmei
+      ? memo.prediction.honmei.match(/^\s*(\d+)/)?.[1] || ""
+      : "";
+
+    const initialTickets =
+      memo.tickets && memo.tickets.length > 0
+        ? memo.tickets.map((t) => ({
+            type: t.type,
+            selection: t.selection,
+            investment: t.investment,
+            payout: t.payout,
+            isHit: t.isHit,
+          }))
+        : autoAddTicket
+          ? [
+              {
+                type: "単勝",
+                selection: honmeiNum,
+                investment: 100,
+                payout: 0,
+                isHit: false,
+              },
+            ]
+          : [];
+
+    setTickets(initialTickets);
     setScrapedResults(memo.resultList || []);
+    setScrapedPayouts({});
     setNetkeibaUrl(memo.netkeibaUrl || "");
 
     if (memo.fetchedHorses && memo.fetchedHorses.length > 0) {
@@ -1464,11 +1492,17 @@ export default function Home() {
       setFetchedHorses([]);
     }
 
+    const currentEditId = memo.id;
     if (memo.netkeibaUrl) {
       fetch(`/api/scrape?url=${encodeURIComponent(memo.netkeibaUrl)}`)
         .then((r) => r.json())
         .then((data) => {
-          if (data && data.payouts && Object.keys(data.payouts).length > 0) {
+          if (
+            editingIdRef.current === currentEditId &&
+            data &&
+            data.payouts &&
+            Object.keys(data.payouts).length > 0
+          ) {
             setScrapedPayouts(data.payouts);
             if (data.results && data.results.length > 0) {
               setScrapedResults(data.results);
@@ -1560,6 +1594,7 @@ export default function Home() {
   // Cancel edit mode
   const handleCancelEdit = () => {
     setEditingId(null);
+    editingIdRef.current = null;
     setDate("");
     setRaceName("");
     setHonmei("");
@@ -1594,6 +1629,13 @@ export default function Home() {
     const validTickets = tickets.filter(
       (t) => t.selection && t.selection.trim() !== "",
     );
+
+    if (tickets.length > 0 && validTickets.length === 0) {
+      showToast(
+        "馬券の買い目を入力してください（馬券なしで保存する場合は「馬券をクリア」を押してください）",
+      );
+      return;
+    }
 
     const calculatedTickets =
       validTickets.length > 0 &&
@@ -1644,11 +1686,14 @@ export default function Home() {
     const res = await saveMemo(memoPayload);
     if (res.success) {
       const savedDate = memoPayload.date;
-      if (viewMode === "calendar") {
+      const targetViewMode = preEditViewMode || viewMode;
+      if (targetViewMode === "calendar") {
         setSelectedDateStr(savedDate);
         // Safely set calendar month view avoiding timezone shift
         const [y, m] = savedDate.split("-").map(Number);
         setCalendarDate(new Date(y, m - 1, 1));
+        setActiveMemoId(editingId || res.id || null);
+      } else {
         setActiveMemoId(editingId || res.id || null);
       }
 
@@ -1657,6 +1702,7 @@ export default function Home() {
 
       // Reset form fields
       setEditingId(null);
+      editingIdRef.current = null;
       setDate("");
       setRaceName("");
       setHonmei("");
@@ -2602,9 +2648,24 @@ export default function Home() {
                       <span>
                         📝 馬券は未登録です（予想・メモのみ保存できます）
                       </span>
-                      <span style={{ fontSize: "0.75rem", opacity: 0.7 }}>
-                        馬券を購入した場合は「馬券を追加」からいつでも登録できます
-                      </span>
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{
+                          marginTop: "0.25rem",
+                          padding: "0.4rem 0.85rem",
+                          fontSize: "0.8rem",
+                          background: "rgba(59, 130, 246, 0.2)",
+                          color: "var(--color-blue)",
+                          border: "1px solid rgba(59, 130, 246, 0.4)",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                          fontWeight: "600",
+                        }}
+                        onClick={handleAddTicket}
+                      >
+                        ＋ 馬券を追加して入力する
+                      </button>
                     </div>
                   )}
 
@@ -2734,6 +2795,43 @@ export default function Home() {
                             >
                               🎯
                             </button>
+                            {(() => {
+                              const honmeiNum = honmei
+                                ? honmei.match(/^\s*(\d+)/)?.[1]
+                                : null;
+                              if (!honmeiNum) return null;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleTicketChange(
+                                      index,
+                                      "selection",
+                                      honmeiNum,
+                                    )
+                                  }
+                                  className="btn"
+                                  style={{
+                                    padding: "0.45rem 0.5rem",
+                                    fontSize: "0.75rem",
+                                    height: "36px",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    background: "rgba(239, 68, 68, 0.15)",
+                                    color: "var(--color-rose)",
+                                    border: "1px solid rgba(239, 68, 68, 0.3)",
+                                    borderRadius: "6px",
+                                    cursor: "pointer",
+                                    fontWeight: "bold",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                  title={`本命◎ (${honmeiNum}番) を買い目に入力`}
+                                >
+                                  ◎{honmeiNum}
+                                </button>
+                              );
+                            })()}
                           </div>
 
                           <div
@@ -4609,7 +4707,7 @@ export default function Home() {
                                   }}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleEdit(memo);
+                                    handleEdit(memo, true);
                                   }}
                                 >
                                   ＋ 馬券を追加して編集
@@ -4680,7 +4778,7 @@ export default function Home() {
                                   }}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleEdit(memo);
+                                    handleEdit(memo, memo.tickets.length === 0);
                                   }}
                                 >
                                   編集
