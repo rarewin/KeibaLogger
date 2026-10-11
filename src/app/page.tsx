@@ -1179,12 +1179,17 @@ export default function Home() {
       }
 
       // Generate and save netkeiba link
-      let finalUrl = urlInput.trim();
-      const matchRaceId = finalUrl.match(/race_id=(\d{12})/);
-      if (matchRaceId) {
-        finalUrl = `https://race.netkeiba.com/race/result.html?race_id=${matchRaceId[1]}`;
-      } else if (/^\d{12}$/.test(finalUrl)) {
-        finalUrl = `https://race.netkeiba.com/race/result.html?race_id=${finalUrl}`;
+      let finalUrl = (data.url as string) || urlInput.trim();
+      if (!finalUrl.startsWith("http")) {
+        const idMatch = finalUrl.match(/\b\d{12}\b/);
+        if (idMatch) {
+          const trackCode = idMatch[0].substring(4, 6);
+          const isNar = parseInt(trackCode, 10) >= 30;
+          const domain = isNar
+            ? "https://nar.netkeiba.com"
+            : "https://race.netkeiba.com";
+          finalUrl = `${domain}/race/result.html?race_id=${idMatch[0]}`;
+        }
       }
       setNetkeibaUrl(finalUrl);
 

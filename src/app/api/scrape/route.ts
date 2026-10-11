@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // JRA Race Tracks Map
-const TRACKS: Record<string, string> = {
+const JRA_TRACKS: Record<string, string> = {
   "01": "札幌",
   "02": "函館",
   "03": "福島",
@@ -13,6 +13,67 @@ const TRACKS: Record<string, string> = {
   "09": "阪神",
   "10": "小倉",
 };
+
+// NAR (地方競馬) Race Tracks Map
+const NAR_TRACKS: Record<string, string> = {
+  "30": "門別",
+  "31": "北見",
+  "32": "岩見沢",
+  "33": "帯広",
+  "34": "旭川",
+  "35": "盛岡",
+  "36": "水沢",
+  "37": "上山",
+  "38": "三条",
+  "39": "足利",
+  "40": "宇都宮",
+  "41": "高崎",
+  "42": "浦和",
+  "43": "船橋",
+  "44": "大井",
+  "45": "川崎",
+  "46": "金沢",
+  "47": "笠松",
+  "48": "名古屋",
+  "49": "紀三井寺",
+  "50": "園田",
+  "51": "姫路",
+  "52": "益田",
+  "53": "福山",
+  "54": "高知",
+  "55": "佐賀",
+  "56": "荒尾",
+  "57": "中津",
+  "58": "札幌",
+  "59": "函館",
+  "60": "新潟",
+  "61": "中京",
+  "62": "春木",
+  "63": "北見",
+  "64": "岩見沢",
+  "65": "ばんえい帯広",
+};
+
+const ALL_TRACKS: Record<string, string> = {
+  ...JRA_TRACKS,
+  ...NAR_TRACKS,
+};
+
+function isNarTarget(target: string, raceId: string | null): boolean {
+  if (
+    target.includes("nar.netkeiba.com") ||
+    target.includes("nar.sp.netkeiba.com")
+  ) {
+    return true;
+  }
+  if (raceId) {
+    const trackCode = raceId.substring(4, 6);
+    if (NAR_TRACKS[trackCode] || parseInt(trackCode, 10) >= 30) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Modern JRA Sprinters Mock Pool
 const MOCK_SPRINTERS = [
@@ -128,10 +189,18 @@ function extractHorsesWithDetails(html: string): HorseDetail[] {
     const umabanMatch = row.match(
       /class=["']Umaban[^"']*["'][^>]*>[\s\S]*?(\d+)/i,
     );
-    const horseMatch = row.match(
-      /class=["']HorseName["'][^>]*><a[^>]*title=["']([^"']+)["']/i,
-    );
+    const horseMatch =
+      row.match(
+        /class=["']Horse_?Name["'][^>]*><a[^>]*title=["']([^"']+)["']/i,
+      ) ||
+      row.match(
+        /class=["']Horse_?Name["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i,
+      );
     const jockeyMatch =
+      row.match(
+        /<td[^>]*class=["']Jockey["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i,
+      ) ||
+      row.match(/<td[^>]*class=["']Jockey["'][^>]*>([\s\S]*?)<\/td>/i) ||
       row.match(/class=["']Jockey["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i) ||
       row.match(/class=["']Jockey["'][^>]*>([\s\S]*?)<\/td>/i);
 
@@ -153,15 +222,30 @@ function extractHorsesWithDetails(html: string): HorseDetail[] {
       continue;
     }
 
-    // 2. Try result.html parsing style (Waku1-8 class, Num Txt_C, Horse_Name)
-    const wakuResultMatch = row.match(/class=["']Num Waku(\d+)[^"']*["']/i);
-    const numResultMatch = row.match(
-      /class=["']Num Txt_C["'][^>]*>[\s\S]*?(\d+)/i,
+    // 2. Try result.html parsing style (Waku1-8 class, Num Txt_C / Num Waku, Horse_Name)
+    const wakuResultMatch = row.match(
+      /class=["'](?:Num\s+)?Waku(\d+)[^"']*["']/i,
     );
-    const horseResultMatch = row.match(
-      /class=["']Horse_Name["'][\s\S]*?title=["']([^"']+)["']/i,
-    );
+    const numResultMatch =
+      row.match(
+        /class=["']Num(?:\s+Txt_C|\s+Waku)?["'][^>]*>[\s\S]*?(\d+)/i,
+      ) ||
+      row.match(/class=["']Umaban[^"']*["'][^>]*>[\s\S]*?(\d+)/i);
+    const horseResultMatch =
+      row.match(
+        /class=["']Horse_?Name["'][^>]*><a[^>]*title=["']([^"']+)["']/i,
+      ) ||
+      row.match(
+        /class=["']Horse_?Name["'][\s\S]*?title=["']([^"']+)["']/i,
+      ) ||
+      row.match(
+        /class=["']Horse_?Name["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i,
+      );
     const jockeyResultMatch =
+      row.match(
+        /<td[^>]*class=["']Jockey["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i,
+      ) ||
+      row.match(/<td[^>]*class=["']Jockey["'][^>]*>([\s\S]*?)<\/td>/i) ||
       row.match(/class=["']Jockey["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i) ||
       row.match(/class=["']Jockey["'][^>]*>([\s\S]*?)<\/td>/i);
 
@@ -215,17 +299,17 @@ function extractPayouts(
 
   for (const type of ticketTypes) {
     const trRegex = new RegExp(
-      `<tr class=["']${type.className}["']>([\\s\\S]*?)<\/tr>`,
+      `<tr[^>]*class=["'](?:[^"']*\\s+)?${type.className}(?:\\s+[^"']*)?["'][^>]*>([\\s\\S]*?)<\/tr>`,
       "i",
     );
     const trMatch = html.match(trRegex);
     if (trMatch) {
       const block = trMatch[1];
       const resultMatch = block.match(
-        /<td class=["']Result["']>([\s\S]*?)<\/td>/i,
+        /<td\s+[^>]*class=["']Result["'][^>]*>([\s\S]*?)<\/td>/i,
       );
       const payoutMatch = block.match(
-        /<td class=["']Payout["']>([\s\S]*?)<\/td>/i,
+        /<td\s+[^>]*class=["']Payout["'][^>]*>([\s\S]*?)<\/td>/i,
       );
 
       if (resultMatch && payoutMatch) {
@@ -280,23 +364,32 @@ function extractResults(
 
   for (const trMatch of trMatches) {
     const row = trMatch[1];
-    const rankMatch = row.match(/class=["']Rank["'][^>]*>[\s\S]*?(\d+)/i);
+    const rankMatch =
+      row.match(/class=["'](?:Result_Num|Rank)["'][^>]*>[\s\S]*?(\d+)/i) ||
+      row.match(/<div class=["']Rank["'][^>]*>[\s\S]*?(\d+)/i);
 
     if (rankMatch) {
       const rank = parseInt(rankMatch[1], 10);
 
       // Only extract top 5 positions
       if (rank >= 1 && rank <= 5) {
-        const numMatch = row.match(
-          /class=["']Num Txt_C["'][^>]*>[\s\S]*?(\d+)/i,
-        );
-        const horseMatch = row.match(
-          /class=["']Horse_Name["'][\s\S]*?title=["']([^"']+)["']/i,
-        );
+        const numMatch =
+          row.match(
+            /class=["']Num(?:\s+Txt_C|\s+Waku)?["'][^>]*>[\s\S]*?(\d+)/i,
+          ) ||
+          row.match(/class=["']Umaban[^"']*["'][^>]*>[\s\S]*?(\d+)/i);
+        const horseMatch =
+          row.match(
+            /class=["']Horse_?Name["'][\s\S]*?title=["']([^"']+)["']/i,
+          ) ||
+          row.match(
+            /class=["']Horse_?Name["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i,
+          );
         const jockeyMatch =
           row.match(
-            /class=["']Jockey["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i,
-          ) || row.match(/class=["']Jockey["'][^>]*>([\s\S]*?)<\/td>/i);
+            /<td[^>]*class=["']Jockey["'][^>]*>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i,
+          ) ||
+          row.match(/<td[^>]*class=["']Jockey["'][^>]*>([\s\S]*?)<\/td>/i);
 
         let jockey = "";
         if (jockeyMatch) {
@@ -331,24 +424,33 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const raceIdMatch = target.match(/race_id=(\d{12})/);
+  const raceIdMatch =
+    target.match(/race_id=(\d{12})/) || target.match(/\/race\/(\d{12})\b/);
   const raceId = raceIdMatch
     ? raceIdMatch[1]
     : target.match(/^\d{12}$/)
       ? target
       : null;
 
+  const isNar = isNarTarget(target, raceId);
+  const domain = isNar
+    ? "https://nar.netkeiba.com"
+    : "https://race.netkeiba.com";
+
   // Default to fetching result page first to check if race is finished and get payouts
   let fetchUrl = target;
   let isResultFetch = false;
   if (raceId) {
-    fetchUrl = `https://race.netkeiba.com/race/result.html?race_id=${raceId}`;
+    fetchUrl = `${domain}/race/result.html?race_id=${raceId}`;
+    isResultFetch = true;
+  } else if (target.includes("result.html")) {
     isResultFetch = true;
   }
 
   let scrapedData: {
     success: boolean;
     source: string;
+    url: string;
     date: string;
     track: string;
     raceNumber: string;
@@ -385,12 +487,15 @@ export async function GET(request: NextRequest) {
     // If result page failed to return horses (e.g. race not yet held, page doesn't exist), fallback to entries page
     if (horses.length === 0 && isResultFetch && raceId) {
       isResultFetch = false;
-      fetchUrl = `https://race.netkeiba.com/race/shutuba.html?race_id=${raceId}`;
+      fetchUrl = `${domain}/race/shutuba.html?race_id=${raceId}`;
       const retryRes = await fetch(fetchUrl, fetchOptions);
       if (retryRes.ok) {
         const retryHtml = await retryRes.text();
         horses = extractHorsesWithDetails(retryHtml);
-        title = extractTitle(retryHtml);
+        const retryTitle = extractTitle(retryHtml);
+        if (retryTitle) {
+          title = retryTitle;
+        }
       }
     } else if (isResultFetch && html) {
       payouts = extractPayouts(html);
@@ -401,14 +506,17 @@ export async function GET(request: NextRequest) {
       title &&
       (title.includes("出馬表") ||
         title.includes("結果") ||
-        title.includes("レース"))
+        title.includes("レース") ||
+        title.includes("netkeiba"))
     ) {
       const raceName = title
         .split("|")[0]
         .replace("出馬表", "")
+        .replace("結果・払戻", "")
         .replace("結果", "")
+        .replace("払戻", "")
         .trim();
-      let track = "東京";
+      let track = isNar ? "大井" : "東京";
       let raceNumber = "11";
       let dateVal = new Date().toISOString().split("T")[0];
       const metaMatch = title.match(
@@ -427,21 +535,32 @@ export async function GET(request: NextRequest) {
         }
       } else if (raceId) {
         const trackCode = raceId.substring(4, 6);
-        track = TRACKS[trackCode] || "東京";
+        track = ALL_TRACKS[trackCode] || (isNar ? "大井" : "東京");
         raceNumber = parseInt(raceId.substring(10, 12), 10).toString();
         const yyyy = raceId.substring(0, 4);
-        const today = new Date();
-        const mm = String(today.getMonth() + 1).padStart(2, "0");
-        const dd = String(today.getDate()).padStart(2, "0");
-        dateVal = `${yyyy}-${mm}-${dd}`;
+        if (isNar) {
+          const mm = raceId.substring(6, 8);
+          const dd = raceId.substring(8, 10);
+          dateVal = `${yyyy}-${mm}-${dd}`;
+        } else {
+          const today = new Date();
+          const mm = String(today.getMonth() + 1).padStart(2, "0");
+          const dd = String(today.getDate()).padStart(2, "0");
+          dateVal = `${yyyy}-${mm}-${dd}`;
+        }
       }
 
       if (horses.length > 0) {
         scrapedData = {
           success: true,
           source: isResultFetch
-            ? "scraped-netkeiba-result"
-            : "scraped-netkeiba-entries",
+            ? isNar
+              ? "scraped-nar-result"
+              : "scraped-netkeiba-result"
+            : isNar
+              ? "scraped-nar-entries"
+              : "scraped-netkeiba-entries",
+          url: `${domain}/race/${isResultFetch ? "result" : "shutuba"}.html?race_id=${raceId || ""}`,
           date: dateVal,
           track,
           raceNumber,
@@ -464,31 +583,67 @@ export async function GET(request: NextRequest) {
   if (raceId) {
     const trackCode = raceId.substring(4, 6);
     const raceNumCode = raceId.substring(10, 12);
+    const isNar = isNarTarget(target, raceId);
 
-    const track = TRACKS[trackCode] || "東京";
+    const track = ALL_TRACKS[trackCode] || (isNar ? "大井" : "東京");
     const raceNumber = parseInt(raceNumCode, 10).toString();
     const yyyy = raceId.substring(0, 4);
-    const today = new Date();
-    const mm = String(today.getMonth() + 1).padStart(2, "0");
-    const dd = String(today.getDate()).padStart(2, "0");
-    const dateStr = `${yyyy}-${mm}-${dd}`;
+
+    let dateStr = "";
+    if (isNar) {
+      const mm = raceId.substring(6, 8);
+      const dd = raceId.substring(8, 10);
+      dateStr = `${yyyy}-${mm}-${dd}`;
+    } else {
+      const today = new Date();
+      const mm = String(today.getMonth() + 1).padStart(2, "0");
+      const dd = String(today.getDate()).padStart(2, "0");
+      dateStr = `${yyyy}-${mm}-${dd}`;
+    }
 
     const isSprint =
       (trackCode === "10" && raceNumber === "11") ||
       (trackCode === "04" && raceNumber === "11") ||
       (trackCode === "02" && raceNumber === "11");
 
-    const pool = isSprint ? MOCK_SPRINTERS : MOCK_MID_LONG;
-    const mockJockeys = [
-      "ルメール",
-      "川田将雅",
-      "武豊",
-      "戸崎圭太",
-      "坂井瑠星",
-      "横山武史",
-      "松山弘平",
-      "デムーロ",
-    ];
+    const pool = isNar
+      ? [
+          "ミックファイア",
+          "ウシュバテソーロ",
+          "メイショウハリオ",
+          "ウィルソンテソーロ",
+          "クラウンプライド",
+          "ディクテオン",
+          "デルマソトガケ",
+          "フォーエバーヤング",
+          "ライトウォーリア",
+          "キングズソード",
+        ]
+      : isSprint
+        ? MOCK_SPRINTERS
+        : MOCK_MID_LONG;
+
+    const mockJockeys = isNar
+      ? [
+          "笹川翼",
+          "森泰斗",
+          "矢野貴之",
+          "吉原寛人",
+          "御神本訓",
+          "赤岡修次",
+          "本田正重",
+          "町田直希",
+        ]
+      : [
+          "ルメール",
+          "川田将雅",
+          "武豊",
+          "戸崎圭太",
+          "坂井瑠星",
+          "横山武史",
+          "松山弘平",
+          "デムーロ",
+        ];
 
     const seed = parseInt(raceId.substring(6, 12), 10) || 123456;
     const shuffledHorses = [...pool].sort((a, b) => {
@@ -510,7 +665,7 @@ export async function GET(request: NextRequest) {
     });
 
     let raceName = `${track}第${raceNumber}レース`;
-    if (raceNumber === "11") {
+    if (raceNumber === "11" && !isNar) {
       const candidates = MAIN_RACES_BY_TRACK[trackCode];
       if (candidates && candidates.length > 0) {
         const seedVal = parseInt(raceId.substring(6, 10), 10) || 0;
@@ -523,19 +678,19 @@ export async function GET(request: NextRequest) {
       {
         rank: 1,
         horseNumber: "1",
-        horseName: selectedHorses[0] || "ドウデュース",
+        horseName: selectedHorses[0] || (isNar ? "ミックファイア" : "ドウデュース"),
         jockey: mockJockeys[0],
       },
       {
         rank: 2,
         horseNumber: "2",
-        horseName: selectedHorses[1] || "イクイノックス",
+        horseName: selectedHorses[1] || (isNar ? "ウシュバテソーロ" : "イクイノックス"),
         jockey: mockJockeys[1],
       },
       {
         rank: 3,
         horseNumber: "3",
-        horseName: selectedHorses[2] || "リバティアイランド",
+        horseName: selectedHorses[2] || (isNar ? "メイショウハリオ" : "リバティアイランド"),
         jockey: mockJockeys[2],
       },
     ];
@@ -543,6 +698,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       source: "id-parser-mock",
+      url: `${domain}/race/result.html?race_id=${raceId}`,
       date: dateStr,
       track,
       raceNumber,
@@ -555,6 +711,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     success: true,
     source: "generic-mock",
+    url: "https://race.netkeiba.com/race/result.html?race_id=202405040811",
     date: new Date().toISOString().split("T")[0],
     track: "東京",
     raceNumber: "11",
