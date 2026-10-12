@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import iconv from "iconv-lite";
 
 // JRA Race Tracks Map
 const JRA_TRACKS: Record<string, string> = {
@@ -58,6 +59,23 @@ const ALL_TRACKS: Record<string, string> = {
   ...JRA_TRACKS,
   ...NAR_TRACKS,
 };
+
+// Reverse map from track name to track code
+const TRACK_NAME_TO_CODE: Record<string, string> = {};
+for (const [code, name] of Object.entries(JRA_TRACKS)) {
+  TRACK_NAME_TO_CODE[name] = code;
+}
+for (const [code, name] of Object.entries(NAR_TRACKS)) {
+  TRACK_NAME_TO_CODE[name] = code;
+}
+TRACK_NAME_TO_CODE["帯広"] = "65";
+TRACK_NAME_TO_CODE["帯広(ば)"] = "65";
+TRACK_NAME_TO_CODE["ばんえい"] = "65";
+
+function normalizeTrackName(track: string): string {
+  if (track.includes("帯広") || track.includes("ばんえい")) return "ばんえい帯広";
+  return track.replace(/競馬場/g, "").trim();
+}
 
 function isNarTarget(target: string, raceId: string | null): boolean {
   if (
@@ -413,13 +431,212 @@ function extractResults(
   return results.sort((a, b) => a.rank - b.rank);
 }
 
+// Helper: Resolve race ID from date (YYYY-MM-DD), track name, and race number
+async function resolveRaceId(
+  dateStr: string,
+  trackName: string,
+  raceNumberStr: string,
+): Promise<{
+  raceId: string;
+  isNar: boolean;
+  url: string;
+  track: string;
+  raceNumber: string;
+} | null> {
+  const yyyymmdd = dateStr.replace(/[-/]/g, "").trim();
+  if (yyyymmdd.length !== 8) return null;
+  const year = yyyymmdd.substring(0, 4);
+  const mmdd = yyyymmdd.substring(4, 8);
+  const raceNum = parseInt(raceNumberStr, 10);
+  if (isNaN(raceNum) || raceNum < 1 || raceNum > 12) return null;
+  const raceNumPadded = String(raceNum).padStart(2, "0");
+
+  const normalizedTrack = normalizeTrackName(trackName);
+  const trackCode = TRACK_NAME_TO_CODE[normalizedTrack];
+
+  // 1. If it's a known NAR track, construct predictable NAR race ID
+  if (trackCode && parseInt(trackCode, 10) >= 30) {
+    const narId = `${year}${trackCode}${mmdd}${raceNumPadded}`;
+    return {
+      raceId: narId,
+      isNar: true,
+      url: `https://nar.netkeiba.com/race/result.html?race_id=${narId}`,
+      track: ALL_TRACKS[trackCode] || normalizedTrack,
+      raceNumber: String(raceNum),
+    };
+  }
+
+  // 2. Query race.netkeiba.com/top/race_list_sub.html?kaisai_date=YYYYMMDD (JRA live/recent, UTF-8)
+  try {
+    const subUrl = `https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=${yyyymmdd}`;
+    const res = await fetch(subUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (res.ok) {
+      const html = await res.text();
+      const dlMatches = [
+        ...html.matchAll(
+          /<dl class=["']RaceList_DataList[^"']*["'][^>]*>([\s\S]*?)<\/dl>/g,
+        ),
+      ];
+      for (const dlMatch of dlMatches) {
+        const block = dlMatch[1];
+        const headerMatch = block.match(
+          /<dt class=["']RaceList_DataHeader["'][^>]*>([\s\S]*?)<\/dt>/,
+        );
+        const headerText = headerMatch
+          ? headerMatch[1].replace(/<[^>]+>/g, "").trim()
+          : "";
+
+        const matchesTrack =
+          headerText.includes(normalizedTrack) ||
+          normalizedTrack.includes(headerText) ||
+          (trackCode && headerText.includes(JRA_TRACKS[trackCode] || ""));
+
+        if (matchesTrack) {
+          const raceItemMatches = [
+            ...block.matchAll(
+              /<li[^>]*class=["']RaceList_DataItem[^"']*["'][\s\S]*?<\/li>/g,
+            ),
+          ];
+          for (const itemMatch of raceItemMatches) {
+            const item = itemMatch[0];
+            const rNumMatch =
+              item.match(/class=["']Race_Num["'][^>]*>[\s\S]*?(\d+)R/i) ||
+              item.match(/(\d+)\s*R/i);
+            if (rNumMatch && parseInt(rNumMatch[1], 10) === raceNum) {
+              const idMatch = item.match(/race_id=(\d{12})/);
+              if (idMatch) {
+                const foundId = idMatch[1];
+                const isNar = parseInt(foundId.substring(4, 6), 10) >= 30;
+                const domain = isNar
+                  ? "https://nar.netkeiba.com"
+                  : "https://race.netkeiba.com";
+                return {
+                  raceId: foundId,
+                  isNar,
+                  url: `${domain}/race/result.html?race_id=${foundId}`,
+                  track: trackCode
+                    ? ALL_TRACKS[trackCode] || normalizedTrack
+                    : normalizedTrack,
+                  raceNumber: String(raceNum),
+                };
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // continue to db.netkeiba
+  }
+
+  // 3. Query db.netkeiba.com/race/list/YYYYMMDD/ (JRA archive, EUC-JP)
+  try {
+    const dbUrl = `https://db.netkeiba.com/race/list/${yyyymmdd}/`;
+    const res = await fetch(dbUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (res.ok) {
+      const buffer = await res.arrayBuffer();
+      const html = iconv.decode(Buffer.from(buffer), "euc-jp");
+
+      const holdSections = html.split('<dl class="race_top_hold_list">');
+      for (let i = 1; i < holdSections.length; i++) {
+        const section = holdSections[i];
+        const headerMatch = section.match(
+          /<dt class="race_top_hold_data">[\s\S]*?<p>([\s\S]*?)<\/p>/,
+        );
+        const sectionTrack = headerMatch
+          ? headerMatch[1].replace(/<[^>]+>/g, "").trim()
+          : "";
+
+        const matchesTrack =
+          sectionTrack.includes(normalizedTrack) ||
+          normalizedTrack.includes(sectionTrack) ||
+          (trackCode && sectionTrack.includes(JRA_TRACKS[trackCode] || ""));
+
+        if (matchesTrack) {
+          const racePattern = new RegExp(
+            `<dt>\\s*${raceNum}R\\s*<\\/dt>[\\s\\S]*?\\/race\\/(\\d{12})\\/`,
+            "i",
+          );
+          const rMatch = section.match(racePattern);
+          if (rMatch) {
+            const foundId = rMatch[1];
+            const isNar = parseInt(foundId.substring(4, 6), 10) >= 30;
+            const domain = isNar
+              ? "https://nar.netkeiba.com"
+              : "https://race.netkeiba.com";
+            return {
+              raceId: foundId,
+              isNar,
+              url: `${domain}/race/result.html?race_id=${foundId}`,
+              track: trackCode
+                ? ALL_TRACKS[trackCode] || normalizedTrack
+                : normalizedTrack,
+              raceNumber: String(raceNum),
+            };
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // search failed
+  }
+
+  return null;
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const target = searchParams.get("url") || "";
+  let target = searchParams.get("url") || "";
+  const paramDate = searchParams.get("date") || "";
+  const paramTrack = searchParams.get("track") || "";
+  const paramRaceNumber = searchParams.get("raceNumber") || "";
+
+  let resolvedTrack = paramTrack;
+  let resolvedRaceNumber = paramRaceNumber;
+  let resolvedDate = paramDate;
+
+  // If no direct URL/ID is given, attempt to resolve from date, track, and raceNumber
+  if (!target && paramDate && paramTrack && paramRaceNumber) {
+    const resolved = await resolveRaceId(
+      paramDate,
+      paramTrack,
+      paramRaceNumber,
+    );
+    if (resolved) {
+      target = resolved.url;
+      resolvedTrack = resolved.track;
+      resolvedRaceNumber = resolved.raceNumber;
+    } else {
+      // Offline / fallback ID construction if track code is recognized
+      const norm = normalizeTrackName(paramTrack);
+      const trackCode = TRACK_NAME_TO_CODE[norm];
+      const yyyymmdd = paramDate.replace(/[-/]/g, "");
+      const isNarTrack = trackCode && parseInt(trackCode, 10) >= 30;
+      if (trackCode && isNarTrack) {
+        const fallbackNarId = `${yyyymmdd.substring(0, 4)}${trackCode}${yyyymmdd.substring(4, 8)}${String(paramRaceNumber).padStart(2, "0")}`;
+        target = `https://nar.netkeiba.com/race/result.html?race_id=${fallbackNarId}`;
+      } else if (trackCode) {
+        const fallbackJraId = `${yyyymmdd.substring(0, 4)}${trackCode}0101${String(paramRaceNumber).padStart(2, "0")}`;
+        target = `https://race.netkeiba.com/race/result.html?race_id=${fallbackJraId}`;
+      }
+    }
+  }
 
   if (!target) {
     return NextResponse.json(
-      { error: "URL or ID is required" },
+      { error: "URLまたは日付・開催場・レース番号を指定してください" },
       { status: 400 },
     );
   }
@@ -516,9 +733,9 @@ export async function GET(request: NextRequest) {
         .replace("結果", "")
         .replace("払戻", "")
         .trim();
-      let track = isNar ? "大井" : "東京";
-      let raceNumber = "11";
-      let dateVal = new Date().toISOString().split("T")[0];
+      let track = resolvedTrack || (isNar ? "大井" : "東京");
+      let raceNumber = resolvedRaceNumber || "11";
+      let dateVal = resolvedDate || new Date().toISOString().split("T")[0];
       const metaMatch = title.match(
         /(\d{4}年\d{1,2}月\d{1,2}日)\s+(\S+?)(\d{1,2})R/,
       );
@@ -535,10 +752,15 @@ export async function GET(request: NextRequest) {
         }
       } else if (raceId) {
         const trackCode = raceId.substring(4, 6);
-        track = ALL_TRACKS[trackCode] || (isNar ? "大井" : "東京");
-        raceNumber = parseInt(raceId.substring(10, 12), 10).toString();
+        track =
+          resolvedTrack || ALL_TRACKS[trackCode] || (isNar ? "大井" : "東京");
+        raceNumber =
+          resolvedRaceNumber ||
+          parseInt(raceId.substring(10, 12), 10).toString();
         const yyyy = raceId.substring(0, 4);
-        if (isNar) {
+        if (resolvedDate) {
+          dateVal = resolvedDate;
+        } else if (isNar) {
           const mm = raceId.substring(6, 8);
           const dd = raceId.substring(8, 10);
           dateVal = `${yyyy}-${mm}-${dd}`;
@@ -585,12 +807,16 @@ export async function GET(request: NextRequest) {
     const raceNumCode = raceId.substring(10, 12);
     const isNar = isNarTarget(target, raceId);
 
-    const track = ALL_TRACKS[trackCode] || (isNar ? "大井" : "東京");
-    const raceNumber = parseInt(raceNumCode, 10).toString();
+    const track =
+      resolvedTrack || ALL_TRACKS[trackCode] || (isNar ? "大井" : "東京");
+    const raceNumber =
+      resolvedRaceNumber || parseInt(raceNumCode, 10).toString();
     const yyyy = raceId.substring(0, 4);
 
     let dateStr = "";
-    if (isNar) {
+    if (resolvedDate) {
+      dateStr = resolvedDate;
+    } else if (isNar) {
       const mm = raceId.substring(6, 8);
       const dd = raceId.substring(8, 10);
       dateStr = `${yyyy}-${mm}-${dd}`;

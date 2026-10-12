@@ -1133,10 +1133,125 @@ export default function Home() {
     showToast("払戻金・的中状況を自動計算しました！");
   };
 
-  // Handle URL fetch (scrapes entries or results + payouts + order of finish)
+  // Apply scraped race data to form state
+  const applyFetchedRaceData = (
+    data: {
+      date?: string;
+      track?: string;
+      raceNumber?: string;
+      raceName?: string;
+      horses?: ScrapedHorse[];
+      payouts?: Record<string, { selection: string; amount: number }[]>;
+      results?: RaceResult[];
+      url?: string;
+    },
+    fallbackUrl?: string,
+  ) => {
+    if (data.date) setDate(data.date);
+    if (data.track) setTrack(data.track);
+    if (data.raceNumber) setRaceNumber(data.raceNumber);
+    if (data.raceName) setRaceName(data.raceName);
+
+    // Reset predictions and load horses
+    setHonmei("");
+    setTaiko("");
+    setAnago("");
+    setRenge("");
+
+    // Sort fetched horses by Umaban
+    const sortedHorses = (data.horses || []).sort(
+      (a: ScrapedHorse, b: ScrapedHorse) => a.umaban - b.umaban,
+    );
+    setFetchedHorses(sortedHorses);
+
+    // Load payouts and finishing order
+    if (data.payouts && Object.keys(data.payouts).length > 0) {
+      setScrapedPayouts(data.payouts);
+      setTickets((prev) => calculateTicketsPayout(prev, data.payouts!));
+    } else {
+      setScrapedPayouts({});
+    }
+
+    if (data.results && data.results.length > 0) {
+      setScrapedResults(data.results);
+      showToast(
+        `「${data.track || ""} ${data.raceNumber ? data.raceNumber + "R " : ""}${data.raceName || ""}」の情報、結果、払戻金を自動取得しました！`,
+      );
+    } else {
+      setScrapedResults([]);
+      showToast(
+        `「${data.track || ""} ${data.raceNumber ? data.raceNumber + "R " : ""}${data.raceName || ""}」の出走馬情報を取得しました！`,
+      );
+    }
+
+    // Generate and save netkeiba link
+    let finalUrl = data.url || fallbackUrl || "";
+    if (finalUrl && !finalUrl.startsWith("http")) {
+      const idMatch = finalUrl.match(/\b\d{12}\b/);
+      if (idMatch) {
+        const trackCode = idMatch[0].substring(4, 6);
+        const isNar = parseInt(trackCode, 10) >= 30;
+        const domain = isNar
+          ? "https://nar.netkeiba.com"
+          : "https://race.netkeiba.com";
+        finalUrl = `${domain}/race/result.html?race_id=${idMatch[0]}`;
+      }
+    }
+    setNetkeibaUrl(finalUrl);
+  };
+
+  // Fetch race information based on Date + Track + Race Number
+  const handleFetchByConditions = async () => {
+    if (!date) {
+      showToast("日付を選択してください");
+      return;
+    }
+    if (!track) {
+      showToast("開催場を選択してください");
+      return;
+    }
+    if (!raceNumber) {
+      showToast("レース番号を選択してください");
+      return;
+    }
+
+    setIsFetching(true);
+    showToast(`「${date} ${track} ${raceNumber}R」のレース情報を検索中...`);
+
+    try {
+      const query = new URLSearchParams({
+        date,
+        track,
+        raceNumber,
+      });
+      const response = await fetch(`/api/scrape?${query.toString()}`);
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || "取得に失敗しました");
+      }
+
+      const data = await response.json();
+      applyFetchedRaceData(data);
+    } catch (err: unknown) {
+      console.warn("Fetch by conditions failed:", err);
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "レース情報が見つかりませんでした。開催日やレース番号をご確認ください。";
+      showToast(msg);
+    } finally {
+      setIsFetching(false);
+    }
+  };
+
+  // Handle URL fetch (or fallback to conditions if URL is empty)
   const handleFetchRaceInfo = async () => {
-    if (!urlInput) {
-      showToast("レースURLまたはIDを入力してください");
+    if (!urlInput.trim()) {
+      if (date && track && raceNumber) {
+        await handleFetchByConditions();
+        return;
+      }
+      showToast("レースURLまたはIDを入力するか、日付・開催場・レース番号を選択してください");
       return;
     }
 
@@ -1145,90 +1260,22 @@ export default function Home() {
 
     try {
       const response = await fetch(
-        `/api/scrape?url=${encodeURIComponent(urlInput)}`,
+        `/api/scrape?url=${encodeURIComponent(urlInput.trim())}`,
       );
-      if (!response.ok) throw new Error("取得に失敗しました");
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || "取得に失敗しました");
+      }
 
       const data = await response.json();
-
-      setDate(data.date || new Date().toISOString().split("T")[0]);
-      setTrack(data.track || "東京");
-      setRaceNumber(data.raceNumber || "11");
-      setRaceName(data.raceName || "");
-
-      // Reset predictions and load horses
-      setHonmei("");
-      setTaiko("");
-      setAnago("");
-      setRenge("");
-
-      // Sort fetched horses by Umaban (in case API didn't sort, we double-check)
-      const sortedHorses = (data.horses || []).sort(
-        (a: ScrapedHorse, b: ScrapedHorse) => a.umaban - b.umaban,
-      );
-      setFetchedHorses(sortedHorses);
-
-      // Load payouts and finishing order
-      if (data.payouts && Object.keys(data.payouts).length > 0) {
-        setScrapedPayouts(data.payouts);
-        setTickets((prev) => calculateTicketsPayout(prev, data.payouts));
-      } else {
-        setScrapedPayouts({});
-      }
-
-      if (data.results) {
-        setScrapedResults(data.results);
-        showToast(
-          `「${data.raceName}」の情報、結果、払戻金を自動取得しました！`,
-        );
-      } else {
-        setScrapedResults([]);
-        showToast(`「${data.raceName}」の出走馬情報を取得しました！`);
-      }
-
-      // Generate and save netkeiba link
-      let finalUrl = (data.url as string) || urlInput.trim();
-      if (!finalUrl.startsWith("http")) {
-        const idMatch = finalUrl.match(/\b\d{12}\b/);
-        if (idMatch) {
-          const trackCode = idMatch[0].substring(4, 6);
-          const isNar = parseInt(trackCode, 10) >= 30;
-          const domain = isNar
-            ? "https://nar.netkeiba.com"
-            : "https://race.netkeiba.com";
-          finalUrl = `${domain}/race/result.html?race_id=${idMatch[0]}`;
-        }
-      }
-      setNetkeibaUrl(finalUrl);
-
+      applyFetchedRaceData(data, urlInput.trim());
       setUrlInput("");
-    } catch (err) {
-      // Fallback mock
-      setTimeout(() => {
-        setDate(new Date().toISOString().split("T")[0]);
-        setTrack("中山");
-        setRaceNumber("11");
-        setRaceName("有馬記念 (G1)");
-
-        setHonmei("");
-        setTaiko("");
-        setAnago("");
-        setRenge("");
-        setFetchedHorses([
-          { waku: 1, umaban: 1, horseName: "イクイノックス" },
-          { waku: 2, umaban: 2, horseName: "リバティアイランド" },
-          { waku: 3, umaban: 3, horseName: "ドウデュース" },
-          { waku: 4, umaban: 4, horseName: "タイトルホルダー" },
-        ]);
-        setScrapedPayouts({});
-        setScrapedResults([]);
-        setNetkeibaUrl(
-          "https://race.netkeiba.com/race/result.html?race_id=202606020411",
-        );
-        showToast("有馬記念のモックデータを取得しました！(デモモード)");
-      }, 1500);
+    } catch (err: unknown) {
+      console.warn("Fetch by URL failed:", err);
+      const msg = err instanceof Error ? err.message : "URLからの取得に失敗しました";
+      showToast(msg);
     } finally {
-      setTimeout(() => setIsFetching(false), 1500);
+      setIsFetching(false);
     }
   };
 
@@ -2099,17 +2146,20 @@ export default function Home() {
               style={{
                 display: "flex",
                 flexWrap: "wrap",
-                gap: "0.5rem",
+                gap: "0.75rem",
                 alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "1.25rem",
+                padding: "0.75rem 1rem",
               }}
             >
               <div
                 className={styles.fetchText}
                 style={{
-                  flex: "1 1 180px",
+                  flex: "1 1 200px",
                 }}
               >
-                <strong>ネット競馬等のURL・IDから自動入力</strong>
+                <strong>🌐 レース情報の自動取得 (開催情報 / URL・ID)</strong>
                 <div
                   style={{
                     fontSize: "0.7rem",
@@ -2117,44 +2167,79 @@ export default function Home() {
                     marginTop: "0.15rem",
                   }}
                 >
-                  出走馬やレース後の払戻金、結果着順を自動取得できます
+                  日付・場・R番号の指定、またはURL/IDから出走馬や結果・払戻を自動取得できます
                 </div>
               </div>
               <div
                 style={{
                   display: "flex",
-                  gap: "0.25rem",
-                  flex: "1 1 150px",
-                  width: "100%",
+                  gap: "0.4rem",
+                  flex: "1 1 300px",
+                  alignItems: "center",
+                  flexWrap: "wrap",
                 }}
               >
-                <input
-                  type="text"
-                  className="input-control"
-                  placeholder="URLまたはレースID"
-                  style={{
-                    padding: "0.4rem",
-                    fontSize: "0.75rem",
-                    width: "100%",
-                    flexGrow: 1,
-                  }}
-                  value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
-                />
                 <button
                   type="button"
-                  className="btn btn-primary"
+                  className="btn btn-secondary"
                   style={{
-                    padding: "0.4rem 0.6rem",
+                    padding: "0.4rem 0.65rem",
                     fontSize: "0.75rem",
                     borderRadius: "8px",
                     whiteSpace: "nowrap",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.3rem",
+                    fontWeight: "600",
+                    border: "1px solid var(--color-blue)",
+                    color: "var(--color-blue)",
+                    backgroundColor: "rgba(59, 130, 246, 0.08)",
                   }}
-                  onClick={handleFetchRaceInfo}
+                  onClick={handleFetchByConditions}
                   disabled={isFetching}
+                  title="下のフォームで指定した日付・競馬場・レース番号から情報を検索・取得します"
                 >
-                  {isFetching ? "取得中..." : "取得"}
+                  <span>📅 開催情報から取得</span>
+                  <span style={{ opacity: 0.8, fontSize: "0.7rem" }}>
+                    ({track} {raceNumber}R)
+                  </span>
                 </button>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "0.25rem",
+                    flex: "1 1 180px",
+                    minWidth: "160px",
+                  }}
+                >
+                  <input
+                    type="text"
+                    className="input-control"
+                    placeholder="URLまたはレースID"
+                    style={{
+                      padding: "0.4rem",
+                      fontSize: "0.75rem",
+                      width: "100%",
+                      flexGrow: 1,
+                    }}
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{
+                      padding: "0.4rem 0.6rem",
+                      fontSize: "0.75rem",
+                      borderRadius: "8px",
+                      whiteSpace: "nowrap",
+                    }}
+                    onClick={handleFetchRaceInfo}
+                    disabled={isFetching}
+                  >
+                    {isFetching ? "取得中..." : "取得"}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -2301,7 +2386,36 @@ export default function Home() {
                   className={styles.formGroup}
                   style={{ gridColumn: "span 1" }}
                 >
-                  <label htmlFor="race-name-input">レース名</label>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "0.25rem",
+                    }}
+                  >
+                    <label htmlFor="race-name-input" style={{ margin: 0 }}>
+                      レース名
+                    </label>
+                    <button
+                      type="button"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--color-blue)",
+                        fontSize: "0.75rem",
+                        cursor: "pointer",
+                        fontWeight: "600",
+                        padding: "0",
+                        textDecoration: "underline",
+                      }}
+                      onClick={handleFetchByConditions}
+                      disabled={isFetching}
+                      title="選択した日付・競馬場・レース番号からレース名・出走馬・結果を自動取得します"
+                    >
+                      ⚡ 開催情報から自動取得
+                    </button>
+                  </div>
                   <input
                     id="race-name-input"
                     type="text"
@@ -2312,6 +2426,39 @@ export default function Home() {
                     required
                   />
                 </div>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  marginTop: "-0.5rem",
+                  marginBottom: "0.75rem",
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{
+                    fontSize: "0.75rem",
+                    padding: "0.3rem 0.65rem",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.35rem",
+                    color: "var(--color-blue)",
+                    backgroundColor: "rgba(59, 130, 246, 0.08)",
+                    border: "1px solid rgba(59, 130, 246, 0.3)",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    fontWeight: "600",
+                  }}
+                  onClick={handleFetchByConditions}
+                  disabled={isFetching}
+                >
+                  <span>
+                    ⚡ {date || "日付"} {track} {raceNumber}R の情報を自動取得
+                  </span>
+                </button>
               </div>
 
               {/* Predictions */}
