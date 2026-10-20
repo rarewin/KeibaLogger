@@ -618,6 +618,12 @@ export default function Home() {
     "recoveryRate" | "races" | "income"
   >("recoveryRate");
 
+  // Log History sorting states
+  const [logSortBy, setLogSortBy] = useState<
+    "date" | "created" | "income" | "payout" | "recovery"
+  >("date");
+  const [logSortOrder, setLogSortOrder] = useState<"desc" | "asc">("desc");
+
   // Active GUI index and select states for wagers tickets
   const [activeTicketGuiIndex, setActiveTicketGuiIndex] = useState<
     number | null
@@ -774,6 +780,77 @@ export default function Home() {
   // Helper: Calculate actual investment for a single ticket
   const getTicketCost = (t: Omit<TicketData, "id"> | TicketData) => {
     return t.investment;
+  };
+
+  // Sorted memos for Log History
+  const sortedMemos = useMemo(() => {
+    const indexed = memos.map((memo, index) => {
+      const totalInvest = memo.tickets.reduce(
+        (sum, t) => sum + getTicketCost(t),
+        0,
+      );
+      const totalPay = memo.tickets.reduce((sum, t) => sum + t.payout, 0);
+      const income = totalPay - totalInvest;
+      const recovery = totalInvest > 0 ? (totalPay / totalInvest) * 100 : 0;
+      const normDate = normalizeDate(memo.date);
+      const raceNum = parseInt(memo.raceNumber, 10) || 0;
+      return {
+        memo,
+        index,
+        totalInvest,
+        totalPay,
+        income,
+        recovery,
+        normDate,
+        raceNum,
+      };
+    });
+
+    const dir = logSortOrder === "desc" ? -1 : 1;
+
+    indexed.sort((a, b) => {
+      if (logSortBy === "created") {
+        // index 0 is newest createdAt in DB
+        return logSortOrder === "desc" ? a.index - b.index : b.index - a.index;
+      }
+
+      if (logSortBy === "date") {
+        const dateCmp = a.normDate.localeCompare(b.normDate);
+        if (dateCmp !== 0) return dateCmp * dir;
+        const raceCmp = a.raceNum - b.raceNum;
+        if (raceCmp !== 0) return raceCmp * dir;
+        return a.index - b.index;
+      }
+
+      if (logSortBy === "income") {
+        if (a.income !== b.income) return (a.income - b.income) * dir;
+      } else if (logSortBy === "payout") {
+        if (a.totalPay !== b.totalPay) return (a.totalPay - b.totalPay) * dir;
+      } else if (logSortBy === "recovery") {
+        if (a.recovery !== b.recovery) return (a.recovery - b.recovery) * dir;
+        if (a.income !== b.income) return (a.income - b.income) * dir;
+      }
+
+      // Tie-breaker: newest race date & race number first
+      const dateCmp = b.normDate.localeCompare(a.normDate);
+      if (dateCmp !== 0) return dateCmp;
+      const raceCmp = b.raceNum - a.raceNum;
+      if (raceCmp !== 0) return raceCmp;
+      return a.index - b.index;
+    });
+
+    return indexed.map((item) => item.memo);
+  }, [memos, logSortBy, logSortOrder]);
+
+  const handleLogSortChange = (
+    key: "date" | "created" | "income" | "payout" | "recovery",
+  ) => {
+    if (logSortBy === key) {
+      setLogSortOrder((prev) => (prev === "desc" ? "asc" : "desc"));
+    } else {
+      setLogSortBy(key);
+      setLogSortOrder("desc");
+    }
   };
 
   // Calculate Aggregated Statistics (Scoped to selected period)
@@ -4393,15 +4470,109 @@ export default function Home() {
                   </p>
                 </div>
               ) : (
-                memos
-                  .filter((memo) => {
-                    if (viewMode === "list") return true;
-                    return (
-                      normalizeDate(memo.date) ===
-                      normalizeDate(selectedDateStr!)
-                    );
-                  })
-                  .map((memo) => {
+                <>
+                  {(viewMode === "list" ||
+                    (viewMode === "calendar" && selectedDateStr)) && (
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: "0.4rem",
+                        marginBottom: "0.85rem",
+                        padding: "0.5rem 0.65rem",
+                        background: "rgba(17, 24, 39, 0.35)",
+                        border: "1px solid var(--border-color)",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <div
+                        className={styles.analyticsSortGroup}
+                        style={{ flexWrap: "wrap", gap: "0.3rem" }}
+                      >
+                        <span
+                          style={{
+                            color: "var(--text-muted)",
+                            fontSize: "0.7rem",
+                            marginRight: "0.15rem",
+                          }}
+                        >
+                          並び替え:
+                        </span>
+                        {(
+                          [
+                            { key: "date", label: "📅 開催日" },
+                            { key: "created", label: "🕒 登録順" },
+                            { key: "income", label: "💰 収支" },
+                            { key: "payout", label: "🏆 払戻額" },
+                            { key: "recovery", label: "📈 回収率" },
+                          ] as const
+                        ).map((opt) => {
+                          const isActive = logSortBy === opt.key;
+                          const arrow = isActive
+                            ? logSortOrder === "desc"
+                              ? " ↓"
+                              : " ↑"
+                            : "";
+                          return (
+                            <button
+                              key={opt.key}
+                              type="button"
+                              className={`${styles.analyticsSortBtn} ${isActive ? styles.analyticsSortBtnActive : ""}`}
+                              onClick={() => handleLogSortChange(opt.key)}
+                              title={
+                                isActive
+                                  ? "クリックで昇順・降順を切り替え"
+                                  : `${opt.label}で並び替え`
+                              }
+                            >
+                              {opt.label}
+                              {arrow}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <button
+                        type="button"
+                        className={styles.analyticsSortBtn}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.25rem",
+                          color: "var(--text-primary)",
+                          background: "rgba(255, 255, 255, 0.04)",
+                        }}
+                        onClick={() =>
+                          setLogSortOrder((prev) =>
+                            prev === "desc" ? "asc" : "desc",
+                          )
+                        }
+                        title="昇順・降順を切り替え"
+                      >
+                        <span>
+                          {logSortOrder === "desc"
+                            ? logSortBy === "date" || logSortBy === "created"
+                              ? "↓ 新しい順"
+                              : "↓ 高い順"
+                            : logSortBy === "date" || logSortBy === "created"
+                              ? "↑ 古い順"
+                              : "↑ 低い順"}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+
+                  {sortedMemos
+                    .filter((memo) => {
+                      if (viewMode === "list") return true;
+                      return (
+                        normalizeDate(memo.date) ===
+                        normalizeDate(selectedDateStr!)
+                      );
+                    })
+                    .map((memo) => {
                     if (!memo.id) return null;
 
                     // Aggregate totals for this memo (accounting for Support wagers)
@@ -4947,7 +5118,8 @@ export default function Home() {
                         )}
                       </div>
                     );
-                  })
+                  })}
+                </>
               )}
                 </>
               )}
