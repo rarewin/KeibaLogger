@@ -447,6 +447,15 @@ const normalizeDate = (dateStr: string): string => {
 };
 
 type StatsPeriod = "all" | "week" | "month" | "year";
+type LogSortKey = "date" | "created" | "income" | "payout" | "recovery";
+
+const LOG_SORT_OPTIONS: readonly { key: LogSortKey; label: string }[] = [
+  { key: "date", label: "📅 開催日" },
+  { key: "created", label: "🕒 登録順" },
+  { key: "income", label: "💰 収支" },
+  { key: "payout", label: "🏆 払戻額" },
+  { key: "recovery", label: "📈 回収率" },
+];
 
 function getWeekRange(d: Date): {
   startStr: string;
@@ -619,9 +628,7 @@ export default function Home() {
   >("recoveryRate");
 
   // Log History sorting states
-  const [logSortBy, setLogSortBy] = useState<
-    "date" | "created" | "income" | "payout" | "recovery"
-  >("date");
+  const [logSortBy, setLogSortBy] = useState<LogSortKey>("date");
   const [logSortOrder, setLogSortOrder] = useState<"desc" | "asc">("desc");
 
   // Active GUI index and select states for wagers tickets
@@ -794,6 +801,8 @@ export default function Home() {
       const recovery = totalInvest > 0 ? (totalPay / totalInvest) * 100 : 0;
       const normDate = normalizeDate(memo.date);
       const raceNum = parseInt(memo.raceNumber, 10) || 0;
+      const hasConfirmedResult =
+        memo.tickets.length > 0 && memo.result !== "pending";
       return {
         memo,
         index,
@@ -803,6 +812,7 @@ export default function Home() {
         recovery,
         normDate,
         raceNum,
+        hasConfirmedResult,
       };
     });
 
@@ -820,6 +830,17 @@ export default function Home() {
         const raceCmp = a.raceNum - b.raceNum;
         if (raceCmp !== 0) return raceCmp * dir;
         return a.index - b.index;
+      }
+
+      // Place pending / no-ticket records at the end when sorting by financial metrics
+      if (
+        logSortBy === "income" ||
+        logSortBy === "payout" ||
+        logSortBy === "recovery"
+      ) {
+        if (a.hasConfirmedResult !== b.hasConfirmedResult) {
+          return a.hasConfirmedResult ? -1 : 1;
+        }
       }
 
       if (logSortBy === "income") {
@@ -842,9 +863,17 @@ export default function Home() {
     return indexed.map((item) => item.memo);
   }, [memos, logSortBy, logSortOrder]);
 
-  const handleLogSortChange = (
-    key: "date" | "created" | "income" | "payout" | "recovery",
-  ) => {
+  // Filtered memos to display in list or calendar view
+  const displayedMemos = useMemo(() => {
+    if (viewMode === "list") return sortedMemos;
+    if (!selectedDateStr) return [];
+    const targetDate = normalizeDate(selectedDateStr);
+    return sortedMemos.filter(
+      (memo) => normalizeDate(memo.date) === targetDate,
+    );
+  }, [sortedMemos, viewMode, selectedDateStr]);
+
+  const handleLogSortChange = (key: LogSortKey) => {
     if (logSortBy === key) {
       setLogSortOrder((prev) => (prev === "desc" ? "asc" : "desc"));
     } else {
@@ -4462,53 +4491,11 @@ export default function Home() {
                     </div>
                   )}
 
-              {memos.length === 0 ? (
-                <div className={styles.noMemos}>
-                  <p>まだ記録はありません。</p>
-                  <p style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
-                    左のフォームから最初の予想や収支を保存してください。
-                  </p>
-                </div>
-              ) : (
-                <>
-                  {(viewMode === "list" ||
-                    (viewMode === "calendar" && selectedDateStr)) && (
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        flexWrap: "wrap",
-                        gap: "0.4rem",
-                        marginBottom: "0.85rem",
-                        padding: "0.5rem 0.65rem",
-                        background: "rgba(17, 24, 39, 0.35)",
-                        border: "1px solid var(--border-color)",
-                        borderRadius: "8px",
-                      }}
-                    >
-                      <div
-                        className={styles.analyticsSortGroup}
-                        style={{ flexWrap: "wrap", gap: "0.3rem" }}
-                      >
-                        <span
-                          style={{
-                            color: "var(--text-muted)",
-                            fontSize: "0.7rem",
-                            marginRight: "0.15rem",
-                          }}
-                        >
-                          並び替え:
-                        </span>
-                        {(
-                          [
-                            { key: "date", label: "📅 開催日" },
-                            { key: "created", label: "🕒 登録順" },
-                            { key: "income", label: "💰 収支" },
-                            { key: "payout", label: "🏆 払戻額" },
-                            { key: "recovery", label: "📈 回収率" },
-                          ] as const
-                        ).map((opt) => {
+                  {displayedMemos.length > 0 && (
+                    <div className={styles.logSortBar}>
+                      <div className={styles.logSortGroup}>
+                        <span className={styles.logSortLabel}>並び替え:</span>
+                        {LOG_SORT_OPTIONS.map((opt) => {
                           const isActive = logSortBy === opt.key;
                           const arrow = isActive
                             ? logSortOrder === "desc"
@@ -4536,14 +4523,7 @@ export default function Home() {
 
                       <button
                         type="button"
-                        className={styles.analyticsSortBtn}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "0.25rem",
-                          color: "var(--text-primary)",
-                          background: "rgba(255, 255, 255, 0.04)",
-                        }}
+                        className={`${styles.analyticsSortBtn} ${styles.logSortOrderBtn}`}
                         onClick={() =>
                           setLogSortOrder((prev) =>
                             prev === "desc" ? "asc" : "desc",
@@ -4564,15 +4544,15 @@ export default function Home() {
                     </div>
                   )}
 
-                  {sortedMemos
-                    .filter((memo) => {
-                      if (viewMode === "list") return true;
-                      return (
-                        normalizeDate(memo.date) ===
-                        normalizeDate(selectedDateStr!)
-                      );
-                    })
-                    .map((memo) => {
+              {memos.length === 0 ? (
+                <div className={styles.noMemos}>
+                  <p>まだ記録はありません。</p>
+                  <p style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}>
+                    左のフォームから最初の予想や収支を保存してください。
+                  </p>
+                </div>
+              ) : (
+                displayedMemos.map((memo) => {
                     if (!memo.id) return null;
 
                     // Aggregate totals for this memo (accounting for Support wagers)
@@ -5118,8 +5098,7 @@ export default function Home() {
                         )}
                       </div>
                     );
-                  })}
-                </>
+                  })
               )}
                 </>
               )}
