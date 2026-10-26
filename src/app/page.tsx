@@ -5,9 +5,11 @@ import {
   getMemos,
   saveMemo,
   deleteMemo,
+  importMemos,
   type MemoData,
   type TicketData,
   type RaceResult,
+  type ImportMode,
 } from "./actions";
 import styles from "./page.module.css";
 
@@ -1744,8 +1746,8 @@ export default function Home() {
     }
   };
 
-  // Cancel edit mode
-  const handleCancelEdit = () => {
+  // Reset form fields
+  const resetFormFields = () => {
     setEditingId(null);
     editingIdRef.current = null;
     setDate("");
@@ -1762,6 +1764,11 @@ export default function Home() {
     setScrapedPayouts({});
     setScrapedResults([]);
     setNetkeibaUrl("");
+  };
+
+  // Cancel edit mode
+  const handleCancelEdit = () => {
+    resetFormFields();
 
     if (preEditViewMode) {
       setViewMode(preEditViewMode);
@@ -1911,6 +1918,185 @@ export default function Home() {
     }
   };
 
+  // --- JSON Export / Import States & Handlers ---
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importMode, setImportMode] = useState<ImportMode>("merge");
+  const [importFileName, setImportFileName] = useState("");
+  const [importPayload, setImportPayload] = useState<unknown | null>(null);
+  const [importPreview, setImportPreview] = useState<{
+    memoCount: number;
+    ticketCount: number;
+    exportedAt?: string;
+  } | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const resetImportModalState = () => {
+    setImportFileName("");
+    setImportPayload(null);
+    setImportPreview(null);
+    setImportError(null);
+    setIsDraggingFile(false);
+    setImportMode("merge");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleCloseImportModal = () => {
+    if (isImporting) return;
+    setIsImportModalOpen(false);
+    resetImportModalState();
+  };
+
+  const handleExportJson = () => {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const fileName = `keiba-logger-backup-${yyyy}-${mm}-${dd}.json`;
+
+    const exportData = {
+      version: 1,
+      app: "KeibaLogger",
+      exportedAt: now.toISOString(),
+      count: memos.length,
+      memos,
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast(`${memos.length}件のデータをエクスポートしました`);
+  };
+
+  const processImportFile = async (file: File) => {
+    setImportError(null);
+    setImportFileName(file.name);
+
+    try {
+      const text = await file.text();
+      const parsed: unknown = JSON.parse(text);
+
+      let rawList: unknown[] = [];
+      let exportedAt: string | undefined;
+
+      if (Array.isArray(parsed)) {
+        rawList = parsed;
+      } else if (
+        parsed &&
+        typeof parsed === "object" &&
+        "memos" in parsed &&
+        Array.isArray((parsed as { memos: unknown }).memos)
+      ) {
+        rawList = (parsed as { memos: unknown[] }).memos;
+        if (
+          "exportedAt" in parsed &&
+          typeof (parsed as { exportedAt: unknown }).exportedAt === "string"
+        ) {
+          exportedAt = (parsed as { exportedAt: string }).exportedAt;
+        }
+      } else {
+        setImportPayload(null);
+        setImportPreview(null);
+        setImportError(
+          "有効なKeibaLoggerのJSONファイルではありません（memos配列が見つかりません）",
+        );
+        return;
+      }
+
+      let ticketCount = 0;
+      for (let i = 0; i < rawList.length; i++) {
+        const item = rawList[i];
+        if (!item || typeof item !== "object") {
+          setImportPayload(null);
+          setImportPreview(null);
+          setImportError(`${i + 1}件目のデータが不正な形式です`);
+          return;
+        }
+        const rec = item as Record<string, unknown>;
+        if (!rec.date || !rec.track || !rec.raceNumber) {
+          setImportPayload(null);
+          setImportPreview(null);
+          setImportError(
+            `${i + 1}件目のデータに必須項目（日付・開催場・レース番号）が不足しています`,
+          );
+          return;
+        }
+        if (Array.isArray(rec.tickets)) {
+          ticketCount += rec.tickets.length;
+        }
+      }
+
+      setImportPayload(parsed);
+      setImportPreview({
+        memoCount: rawList.length,
+        ticketCount,
+        exportedAt,
+      });
+    } catch {
+      setImportPayload(null);
+      setImportPreview(null);
+      setImportError(
+        "JSONファイルの解析に失敗しました。ファイル形式を確認してください。",
+      );
+    }
+  };
+
+  const handleExecuteImport = async () => {
+    if (!importPayload || !importPreview) return;
+
+    if (
+      importMode === "replace" &&
+      memos.length > 0 &&
+      !window.confirm(
+        `現在のデータ（${memos.length}件）をすべて消去して、ファイルの${importPreview.memoCount}件で上書きします。よろしいですか？`,
+      )
+    ) {
+      return;
+    }
+
+    setIsImporting(true);
+    setImportError(null);
+    try {
+      const res = await importMemos(importPayload, importMode);
+      if (res.success) {
+        await refreshMemos();
+        if (importMode === "replace") {
+          setActiveMemoId(null);
+          setSelectedDateStr(null);
+          resetFormFields();
+        }
+        setIsImportModalOpen(false);
+        resetImportModalState();
+        if (importMode === "replace") {
+          showToast(`${res.count ?? 0}件のデータを復元しました`);
+        } else {
+          showToast(
+            `インポート完了（新規: ${res.addedCount ?? 0}件 / 更新: ${res.updatedCount ?? 0}件）`,
+          );
+        }
+      } else {
+        setImportError(res.error || "インポートに失敗しました");
+      }
+    } catch {
+      setImportError("インポート処理中にエラーが発生しました");
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   return (
     <div className="container animate-fade-in">
       {/* Toast Notification */}
@@ -1930,26 +2116,353 @@ export default function Home() {
         </div>
       )}
 
+      {/* JSON Import Modal */}
+      {isImportModalOpen && (
+        <div className={styles.modalOverlay} onClick={handleCloseImportModal}>
+          <div
+            className={styles.modalCard}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <h3 className={styles.modalTitle}>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--color-emerald)"
+                  strokeWidth="2.5"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                JSONデータのインポート
+              </h3>
+              <button
+                type="button"
+                className={styles.modalCloseBtn}
+                onClick={handleCloseImportModal}
+                aria-label="閉じる"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* File Dropzone / Picker */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) processImportFile(file);
+              }}
+            />
+            <div
+              className={`${styles.dropzone} ${isDraggingFile ? styles.dropzoneActive : ""}`}
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDraggingFile(true);
+              }}
+              onDragLeave={() => setIsDraggingFile(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDraggingFile(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) processImportFile(file);
+              }}
+            >
+              <svg
+                width="28"
+                height="28"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--color-emerald)"
+                strokeWidth="2"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+              <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>
+                {importFileName
+                  ? `選択中: ${importFileName}`
+                  : "クリックまたはドラッグ＆ドロップでJSONファイルを選択"}
+              </div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                KeibaLoggerからエクスポートした .json ファイルに対応しています
+              </div>
+            </div>
+
+            {/* Error Alert */}
+            {importError && (
+              <div
+                style={{
+                  background: "rgba(244, 63, 94, 0.12)",
+                  border: "1px solid rgba(244, 63, 94, 0.35)",
+                  color: "var(--color-rose)",
+                  padding: "0.75rem 1rem",
+                  borderRadius: "8px",
+                  fontSize: "0.85rem",
+                  fontWeight: 500,
+                }}
+              >
+                ⚠️ {importError}
+              </div>
+            )}
+
+            {/* File Preview */}
+            {importPreview && (
+              <div className={styles.importPreviewCard}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    読み込みデータ件数:
+                  </span>
+                  <strong style={{ color: "var(--color-emerald)" }}>
+                    {importPreview.memoCount} レース（馬券{" "}
+                    {importPreview.ticketCount} 件）
+                  </strong>
+                </div>
+                {importPreview.exportedAt && (
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      fontSize: "0.78rem",
+                    }}
+                  >
+                    <span style={{ color: "var(--text-muted)" }}>
+                      エクスポート日時:
+                    </span>
+                    <span style={{ color: "var(--text-secondary)" }}>
+                      {new Date(importPreview.exportedAt).toLocaleString(
+                        "ja-JP",
+                      )}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Import Mode Selection */}
+            <div>
+              <div
+                style={{
+                  fontSize: "0.82rem",
+                  fontWeight: 600,
+                  color: "var(--text-secondary)",
+                  marginBottom: "0.5rem",
+                }}
+              >
+                インポート方法
+              </div>
+              <div className={styles.modeSelector}>
+                <label
+                  className={`${styles.modeOption} ${importMode === "merge" ? styles.modeOptionActive : ""}`}
+                  onClick={() => setImportMode("merge")}
+                >
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={importMode === "merge"}
+                    onChange={() => setImportMode("merge")}
+                    style={{
+                      marginTop: "3px",
+                      accentColor: "var(--color-emerald)",
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: "0.88rem" }}>
+                      追加・更新（マージ）
+                      <span
+                        style={{
+                          marginLeft: "0.5rem",
+                          fontSize: "0.7rem",
+                          padding: "0.1rem 0.45rem",
+                          borderRadius: "999px",
+                          background: "rgba(16, 185, 129, 0.2)",
+                          color: "var(--color-emerald)",
+                        }}
+                      >
+                        推奨
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "0.76rem",
+                        color: "var(--text-secondary)",
+                        marginTop: "0.2rem",
+                      }}
+                    >
+                      現在のデータを残したまま追加します。同一IDのデータがある場合は最新の内容で更新します。
+                    </div>
+                  </div>
+                </label>
+
+                <label
+                  className={`${styles.modeOption} ${importMode === "replace" ? styles.modeOptionDangerActive : ""}`}
+                  onClick={() => setImportMode("replace")}
+                >
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={importMode === "replace"}
+                    onChange={() => setImportMode("replace")}
+                    style={{
+                      marginTop: "3px",
+                      accentColor: "var(--color-rose)",
+                    }}
+                  />
+                  <div>
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: "0.88rem",
+                        color:
+                          importMode === "replace"
+                            ? "var(--color-rose)"
+                            : "inherit",
+                      }}
+                    >
+                      すべて置換（上書き復元）
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "0.76rem",
+                        color: "var(--text-secondary)",
+                        marginTop: "0.2rem",
+                      }}
+                    >
+                      現在保存されているデータ（{memos.length}
+                      件）をすべて削除し、ファイルの内容に完全に置き換えます。
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className={styles.modalFooter}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ padding: "0.55rem 1rem", fontSize: "0.85rem" }}
+                onClick={handleCloseImportModal}
+                disabled={isImporting}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{
+                  padding: "0.55rem 1.2rem",
+                  fontSize: "0.85rem",
+                  background:
+                    importMode === "replace" ? "var(--grad-rose)" : undefined,
+                  opacity: !importPreview || isImporting ? 0.5 : 1,
+                  cursor:
+                    !importPreview || isImporting ? "not-allowed" : "pointer",
+                }}
+                disabled={!importPreview || isImporting}
+                onClick={handleExecuteImport}
+              >
+                {isImporting
+                  ? "インポート中..."
+                  : importMode === "replace"
+                    ? "全件置換して復元する"
+                    : "インポートを実行"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Dashboard Layout */}
       <div className={styles.dashboard}>
         {/* Header Block */}
         <header className={styles.header}>
           <div className={styles.titleArea}>
-            <h1>
-              <span className="text-gradient">KeibaLogger</span>
-              <span className={styles.tagline}>競馬予想＆収支ログ</span>
-            </h1>
-            <p
-              style={{
-                fontSize: "0.85rem",
-                color: "var(--text-muted)",
-                display: "flex",
-                gap: "0.5rem",
-              }}
-            >
-              <span>🗄️ SQLite データベース接続中</span>
-              <span>💾 BOX・流し・フォーメーション対応</span>
-            </p>
+            <div>
+              <h1>
+                <span className="text-gradient">KeibaLogger</span>
+                <span className={styles.tagline}>競馬予想＆収支ログ</span>
+              </h1>
+              <p
+                style={{
+                  fontSize: "0.85rem",
+                  color: "var(--text-muted)",
+                  display: "flex",
+                  gap: "0.5rem",
+                  marginTop: "0.35rem",
+                }}
+              >
+                <span>🗄️ SQLite データベース接続中</span>
+                <span>💾 BOX・流し・フォーメーション対応</span>
+              </p>
+            </div>
+
+            <div className={styles.dataActions}>
+              <button
+                type="button"
+                className={styles.dataActionBtn}
+                onClick={handleExportJson}
+                title="全データをJSONファイルとして保存します"
+              >
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--color-gold)"
+                  strokeWidth="2.5"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                <span>エクスポート (JSON)</span>
+              </button>
+
+              <button
+                type="button"
+                className={styles.dataActionBtn}
+                onClick={() => setIsImportModalOpen(true)}
+                title="JSONファイルからデータを読み込みます"
+              >
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--color-emerald)"
+                  strokeWidth="2.5"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                <span>インポート (JSON)</span>
+              </button>
+            </div>
           </div>
 
           {/* Quick Statistics Header & Period Switcher */}
