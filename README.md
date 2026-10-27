@@ -104,6 +104,8 @@ npm run dev
 | `npm run build` | プロダクション向けにアプリケーションをビルドします |
 | `npm run start` | ビルドしたプロダクションサーバーを起動します |
 | `npm run lint` | ESLint によるコードチェックを実行します |
+| `npm run check` | Biome によるコードチェックを実行します |
+| `npm run format` | Biome によるコードフォーマットを実行します |
 | `npm run db:push` | Prisma スキーマをデータベース（SQLite）へ直接同期・作成します |
 | `npm run db:generate` | Prisma Client を再生成します |
 | `npm run db:studio` | ブラウザでデータベース内容を確認・編集できる Prisma Studio を起動します |
