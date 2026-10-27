@@ -231,6 +231,12 @@ interface NormalizedMemoInput {
   tickets: NormalizedTicketInput[];
 }
 
+const toNonNegativeInt = (val: unknown): number => {
+  if (typeof val !== "number" && typeof val !== "string") return 0;
+  const num = Number(val);
+  return Number.isFinite(num) && num >= 0 ? Math.round(num) : 0;
+};
+
 function normalizeImportMemos(payload: unknown): NormalizedMemoInput[] {
   let rawList: unknown[] = [];
 
@@ -349,18 +355,8 @@ function normalizeImportMemos(payload: unknown): NormalizedMemoInput[] {
         type:
           typeof t.type === "string" && t.type.trim() ? t.type.trim() : "単勝",
         selection: typeof t.selection === "string" ? t.selection.trim() : "",
-        investment:
-          typeof t.investment === "number" && Number.isFinite(t.investment)
-            ? Math.max(0, Math.round(t.investment))
-            : Number(t.investment) >= 0
-              ? Math.round(Number(t.investment))
-              : 0,
-        payout:
-          typeof t.payout === "number" && Number.isFinite(t.payout)
-            ? Math.max(0, Math.round(t.payout))
-            : Number(t.payout) >= 0
-              ? Math.round(Number(t.payout))
-              : 0,
+        investment: toNonNegativeInt(t.investment),
+        payout: toNonNegativeInt(t.payout),
         isHit: Boolean(t.isHit),
       }));
 

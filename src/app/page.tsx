@@ -1951,6 +1951,18 @@ export default function Home() {
     resetImportModalState();
   };
 
+  // Close import modal on Escape key
+  useEffect(() => {
+    if (!isImportModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        handleCloseImportModal();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isImportModalOpen, isImporting]);
+
   const handleExportJson = () => {
     const now = new Date();
     const yyyy = now.getFullYear();
@@ -2026,7 +2038,14 @@ export default function Home() {
           return;
         }
         const rec = item as Record<string, unknown>;
-        if (!rec.date || !rec.track || !rec.raceNumber) {
+        const date = typeof rec.date === "string" ? rec.date.trim() : "";
+        const track = typeof rec.track === "string" ? rec.track.trim() : "";
+        const raceNumber =
+          typeof rec.raceNumber === "string" || typeof rec.raceNumber === "number"
+            ? String(rec.raceNumber).trim()
+            : "";
+
+        if (!date || !track || !raceNumber) {
           setImportPayload(null);
           setImportPreview(null);
           setImportError(
@@ -2035,7 +2054,9 @@ export default function Home() {
           return;
         }
         if (Array.isArray(rec.tickets)) {
-          ticketCount += rec.tickets.length;
+          ticketCount += rec.tickets.filter((t) =>
+            Boolean(t && typeof t === "object"),
+          ).length;
         }
       }
 
@@ -2076,6 +2097,8 @@ export default function Home() {
         if (importMode === "replace") {
           setActiveMemoId(null);
           setSelectedDateStr(null);
+          resetFormFields();
+        } else if (editingId) {
           resetFormFields();
         }
         setIsImportModalOpen(false);
@@ -2118,13 +2141,19 @@ export default function Home() {
 
       {/* JSON Import Modal */}
       {isImportModalOpen && (
-        <div className={styles.modalOverlay} onClick={handleCloseImportModal}>
+        <div
+          className={styles.modalOverlay}
+          onClick={handleCloseImportModal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="import-modal-title"
+        >
           <div
             className={styles.modalCard}
             onClick={(e) => e.stopPropagation()}
           >
             <div className={styles.modalHeader}>
-              <h3 className={styles.modalTitle}>
+              <h3 id="import-modal-title" className={styles.modalTitle}>
                 <svg
                   width="20"
                   height="20"
@@ -2167,6 +2196,7 @@ export default function Home() {
               style={{ display: "none" }}
               onChange={(e) => {
                 const file = e.target.files?.[0];
+                e.target.value = "";
                 if (file) processImportFile(file);
               }}
             />
@@ -2177,7 +2207,11 @@ export default function Home() {
                 e.preventDefault();
                 setIsDraggingFile(true);
               }}
-              onDragLeave={() => setIsDraggingFile(false)}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                  setIsDraggingFile(false);
+                }
+              }}
               onDrop={(e) => {
                 e.preventDefault();
                 setIsDraggingFile(false);
@@ -2278,7 +2312,6 @@ export default function Home() {
               <div className={styles.modeSelector}>
                 <label
                   className={`${styles.modeOption} ${importMode === "merge" ? styles.modeOptionActive : ""}`}
-                  onClick={() => setImportMode("merge")}
                 >
                   <input
                     type="radio"
@@ -2320,7 +2353,6 @@ export default function Home() {
 
                 <label
                   className={`${styles.modeOption} ${importMode === "replace" ? styles.modeOptionDangerActive : ""}`}
-                  onClick={() => setImportMode("replace")}
                 >
                   <input
                     type="radio"
@@ -2425,7 +2457,12 @@ export default function Home() {
                 type="button"
                 className={styles.dataActionBtn}
                 onClick={handleExportJson}
-                title="全データをJSONファイルとして保存します"
+                disabled={memos.length === 0}
+                title={
+                  memos.length === 0
+                    ? "保存されているデータがありません"
+                    : "全データをJSONファイルとして保存します"
+                }
               >
                 <svg
                   width="15"

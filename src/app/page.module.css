@@ -1083,6 +1083,10 @@
   gap: 0.5rem;
 }
 
+.dropzone > * {
+  pointer-events: none;
+}
+
 .dropzone:hover,
 .dropzoneActive {
   border-color: var(--color-emerald);
