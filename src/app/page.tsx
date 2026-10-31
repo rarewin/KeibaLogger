@@ -2203,6 +2203,15 @@ export default function Home() {
             <div
               className={`${styles.dropzone} ${isDraggingFile ? styles.dropzoneActive : ""}`}
               onClick={() => fileInputRef.current?.click()}
+              tabIndex={0}
+              role="button"
+              aria-label="JSONファイルを選択またはドラッグ＆ドロップ"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  fileInputRef.current?.click();
+                }
+              }}
               onDragOver={(e) => {
                 e.preventDefault();
                 setIsDraggingFile(true);
@@ -2275,25 +2284,28 @@ export default function Home() {
                     {importPreview.ticketCount} 件）
                   </strong>
                 </div>
-                {importPreview.exportedAt && (
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      fontSize: "0.78rem",
-                    }}
-                  >
-                    <span style={{ color: "var(--text-muted)" }}>
-                      エクスポート日時:
-                    </span>
-                    <span style={{ color: "var(--text-secondary)" }}>
-                      {new Date(importPreview.exportedAt).toLocaleString(
-                        "ja-JP",
-                      )}
-                    </span>
-                  </div>
-                )}
+                {importPreview.exportedAt &&
+                  !Number.isNaN(
+                    new Date(importPreview.exportedAt).getTime(),
+                  ) && (
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        fontSize: "0.78rem",
+                      }}
+                    >
+                      <span style={{ color: "var(--text-muted)" }}>
+                        エクスポート日時:
+                      </span>
+                      <span style={{ color: "var(--text-secondary)" }}>
+                        {new Date(importPreview.exportedAt).toLocaleString(
+                          "ja-JP",
+                        )}
+                      </span>
+                    </div>
+                  )}
               </div>
             )}
 
