@@ -382,6 +382,8 @@ const INITIAL_MEMOS: Omit<MemoData, "id">[] = [
       taiko: "6 ジャスティンパレス",
       anago: "4 ベラジオオペラ",
       renge: "3 ソールオリエンス",
+      hoshi: "",
+      check: "",
     },
     memoText:
       "重馬場想定。内側の傷みが激しいため外差しが決まる展開とみる。本命ドウデュースは武豊騎手の神騎乗に期待。結果はドウデュースが素晴らしい末脚で差し切り勝ち。対抗のジャスティンパレスは惜しくも届かず4着だったが、3連複が的中して快勝！",
@@ -411,6 +413,8 @@ const INITIAL_MEMOS: Omit<MemoData, "id">[] = [
       taiko: "12 レガレイラ",
       anago: "6 シックスペンス",
       renge: "2 ダノンデサイル",
+      hoshi: "",
+      check: "",
     },
     memoText:
       "スローペース濃厚。先行できるジャスティンミラノを軸にする。ダノンデサイルは馬場状態が合えば一発あると思い連下に。結果はダノンデサイルがインを突いて快勝。本命ジャスティンミラノが2着で馬連はハズレ。ダービーの難しさを改めて実感。",
@@ -450,6 +454,72 @@ const normalizeDate = (dateStr: string): string => {
 
 type StatsPeriod = "all" | "week" | "month" | "year";
 type LogSortKey = "date" | "created" | "income" | "payout" | "recovery";
+type MarkType = "honmei" | "taiko" | "anago" | "renge" | "hoshi" | "check";
+
+const MARK_DEFINITIONS: readonly {
+  key: MarkType;
+  symbol: string;
+  label: string;
+  fullLabel: string;
+  badgeClass: string;
+  triggerClass: string;
+  placeholder: string;
+}[] = [
+  {
+    key: "honmei",
+    symbol: "◎",
+    label: "本命",
+    fullLabel: "◎ 本命",
+    badgeClass: "mark-honmei",
+    triggerClass: styles.markTriggerHonmei,
+    placeholder: "本命馬名 / 馬番 (例: 15 ドウデュース)",
+  },
+  {
+    key: "taiko",
+    symbol: "◯",
+    label: "対抗",
+    fullLabel: "◯ 対抗",
+    badgeClass: "mark-taiko",
+    triggerClass: styles.markTriggerTaiko,
+    placeholder: "対抗馬名 / 馬番 (例: 6 ジャスティンパレス)",
+  },
+  {
+    key: "anago",
+    symbol: "▲",
+    label: "単穴",
+    fullLabel: "▲ 単穴",
+    badgeClass: "mark-anago",
+    triggerClass: styles.markTriggerAnago,
+    placeholder: "単穴馬名 / 馬番 (複数可)",
+  },
+  {
+    key: "renge",
+    symbol: "△",
+    label: "連下",
+    fullLabel: "△ 連下",
+    badgeClass: "mark-renge",
+    triggerClass: styles.markTriggerRenge,
+    placeholder: "連下馬名 / 馬番 (複数可)",
+  },
+  {
+    key: "hoshi",
+    symbol: "☆",
+    label: "星",
+    fullLabel: "☆ 星",
+    badgeClass: "mark-hoshi",
+    triggerClass: styles.markTriggerHoshi,
+    placeholder: "星・特注馬名 / 馬番 (複数可)",
+  },
+  {
+    key: "check",
+    symbol: "✓",
+    label: "チェック",
+    fullLabel: "✓ チェック",
+    badgeClass: "mark-check",
+    triggerClass: styles.markTriggerCheck,
+    placeholder: "チェック・注意馬名 / 馬番 (複数可)",
+  },
+];
 
 const LOG_SORT_OPTIONS: readonly { key: LogSortKey; label: string }[] = [
   { key: "date", label: "📅 開催日" },
@@ -711,6 +781,11 @@ export default function Home() {
   const [taiko, setTaiko] = useState("");
   const [anago, setAnago] = useState("");
   const [renge, setRenge] = useState("");
+  const [hoshi, setHoshi] = useState("");
+  const [check, setCheck] = useState("");
+  const [openMarkDropdownUmaban, setOpenMarkDropdownUmaban] = useState<
+    number | null
+  >(null);
   const [memoText, setMemoText] = useState("");
   const [urlInput, setUrlInput] = useState("");
 
@@ -736,6 +811,31 @@ export default function Home() {
   useEffect(() => {
     refreshMemos();
   }, []);
+
+  // Close mark dropdown on outside click or Escape key
+  useEffect(() => {
+    if (openMarkDropdownUmaban === null) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest("[data-mark-dropdown]")) {
+        setOpenMarkDropdownUmaban(null);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpenMarkDropdownUmaban(null);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openMarkDropdownUmaban]);
 
   // Toast handler
   const showToast = (message: string) => {
@@ -952,11 +1052,16 @@ export default function Home() {
     > = {};
 
     // 5. PREDICTION MARKS STATS
-    const markStats = {
+    const markStats: Record<
+      MarkType,
+      { mark: string; count: number; win: number; top2: number; top3: number; out: number }
+    > = {
       honmei: { mark: "◎ 本命", count: 0, win: 0, top2: 0, top3: 0, out: 0 },
       taiko: { mark: "◯ 対抗", count: 0, win: 0, top2: 0, top3: 0, out: 0 },
-      anago: { mark: "▲ 穴", count: 0, win: 0, top2: 0, top3: 0, out: 0 },
+      anago: { mark: "▲ 単穴", count: 0, win: 0, top2: 0, top3: 0, out: 0 },
       renge: { mark: "△ 連下", count: 0, win: 0, top2: 0, top3: 0, out: 0 },
+      hoshi: { mark: "☆ 星", count: 0, win: 0, top2: 0, top3: 0, out: 0 },
+      check: { mark: "✓ チェック", count: 0, win: 0, top2: 0, top3: 0, out: 0 },
     };
 
     for (const m of filteredStatsMemos) {
@@ -1047,13 +1152,15 @@ export default function Home() {
           .map((r) => String(r.horseNumber));
 
         const markEntries: {
-          key: "honmei" | "taiko" | "anago" | "renge";
+          key: MarkType;
           str: string;
         }[] = [
           { key: "honmei", str: m.prediction.honmei },
           { key: "taiko", str: m.prediction.taiko },
           { key: "anago", str: m.prediction.anago },
           { key: "renge", str: m.prediction.renge },
+          { key: "hoshi", str: m.prediction.hoshi },
+          { key: "check", str: m.prediction.check },
         ];
 
         for (const { key, str } of markEntries) {
@@ -1265,6 +1372,9 @@ export default function Home() {
     setTaiko("");
     setAnago("");
     setRenge("");
+    setHoshi("");
+    setCheck("");
+    setOpenMarkDropdownUmaban(null);
 
     // Sort fetched horses by Umaban
     const sortedHorses = (data.horses || []).sort(
@@ -1387,44 +1497,81 @@ export default function Home() {
     }
   };
 
-  // Helper: Check if a horse is already selected as a specific prediction mark
-  const isHorseMarked = (
-    horse: ScrapedHorse,
-    markType: "honmei" | "taiko" | "anago" | "renge",
-  ) => {
-    const targetVal = horse.jockey
+  const formatHorseEntry = (horse: ScrapedHorse) =>
+    horse.jockey
       ? `${horse.umaban} ${horse.horseName} (${horse.jockey})`
       : `${horse.umaban} ${horse.horseName}`;
 
-    let val = "";
-    if (markType === "honmei") val = honmei;
-    else if (markType === "taiko") val = taiko;
-    else if (markType === "anago") val = anago;
-    else if (markType === "renge") val = renge;
+  const doesTokenMatchHorse = (token: string, horse: ScrapedHorse) => {
+    const trimmed = token.trim();
+    if (!trimmed) return false;
+    if (trimmed === formatHorseEntry(horse)) return true;
+    const parts = trimmed.split(/\s+/);
+    const tokenNum = parts[0];
+    const tokenName = parts[1];
+    return (
+      tokenNum === String(horse.umaban) ||
+      (Boolean(horse.horseName) && tokenName === horse.horseName)
+    );
+  };
 
+  // Helper: Check if a horse is already selected as a specific prediction mark
+  const isHorseMarked = (horse: ScrapedHorse, markType: MarkType) => {
+    const markValues: Record<MarkType, string> = {
+      honmei,
+      taiko,
+      anago,
+      renge,
+      hoshi,
+      check,
+    };
+    const val = markValues[markType];
     if (!val) return false;
 
-    const tokens = val.split(/[,、]\s*/).map((x) => x.trim());
-    return tokens.includes(targetVal);
+    const tokens = val
+      .split(/[,、]\s*/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    return tokens.some((token) => doesTokenMatchHorse(token, horse));
+  };
+
+  // Helper: Get the single prediction mark assigned to a horse (if any)
+  const getHorseSelectedMark = (horse: ScrapedHorse): MarkType | null => {
+    for (const def of MARK_DEFINITIONS) {
+      if (isHorseMarked(horse, def.key)) {
+        return def.key;
+      }
+    }
+    return null;
   };
 
   // Helper: Retrieve a matching prediction mark for a result horse number and name
   const getHorseMark = (
     horseNum: string,
     horseName: string,
-    prediction: { honmei: string; taiko: string; anago: string; renge: string },
+    prediction: {
+      honmei: string;
+      taiko: string;
+      anago: string;
+      renge: string;
+      hoshi?: string;
+      check?: string;
+    },
   ) => {
     const cleanNum = horseNum.trim();
     const cleanName = horseName.trim();
 
-    const matches = (val: string) => {
+    const matches = (val?: string) => {
       if (!val) return false;
       const tokens = val.split(/[,、]\s*/).map((x) => x.trim());
       return tokens.some((token) => {
         const parts = token.split(/\s+/);
         const tokenNum = parts[0];
         const tokenName = parts[1];
-        return tokenNum === cleanNum || tokenName === cleanName;
+        return (
+          (Boolean(cleanNum) && tokenNum === cleanNum) ||
+          (Boolean(cleanName) && tokenName === cleanName)
+        );
       });
     };
 
@@ -1436,59 +1583,81 @@ export default function Home() {
       return { symbol: "▲", className: "mark-anago" };
     if (matches(prediction.renge))
       return { symbol: "△", className: "mark-renge" };
+    if (matches(prediction.hoshi))
+      return { symbol: "☆", className: "mark-hoshi" };
+    if (matches(prediction.check))
+      return { symbol: "✓", className: "mark-check" };
     return null;
   };
 
-  // Assign horse name with horse number and jockey to specific wagers prediction (supports multiple selections and toggles)
-  const handleQuickMark = (
+  // Assign a single prediction mark to a horse (removes the horse from any other mark first)
+  const handleSelectHorseMark = (
     horse: ScrapedHorse,
-    markType: "honmei" | "taiko" | "anago" | "renge",
+    newMark: MarkType | null,
   ) => {
-    const formattedVal = horse.jockey
-      ? `${horse.umaban} ${horse.horseName} (${horse.jockey})`
-      : `${horse.umaban} ${horse.horseName}`;
+    const formattedVal = formatHorseEntry(horse);
+    const currentMark = getHorseSelectedMark(horse);
 
-    let currentVal = "";
-    let setter: (val: string) => void;
-    let label = "";
+    const markValues: Record<MarkType, string> = {
+      honmei,
+      taiko,
+      anago,
+      renge,
+      hoshi,
+      check,
+    };
 
-    if (markType === "honmei") {
-      currentVal = honmei;
-      setter = setHonmei;
-      label = "◎ (本命)";
-    } else if (markType === "taiko") {
-      currentVal = taiko;
-      setter = setTaiko;
-      label = "◯ (対抗)";
-    } else if (markType === "anago") {
-      currentVal = anago;
-      setter = setAnago;
-      label = "▲ (単穴)";
-    } else {
-      currentVal = renge;
-      setter = setRenge;
-      label = "△ (連下)";
-    }
+    const setters: Record<MarkType, (val: string) => void> = {
+      honmei: setHonmei,
+      taiko: setTaiko,
+      anago: setAnago,
+      renge: setRenge,
+      hoshi: setHoshi,
+      check: setCheck,
+    };
 
-    if (!currentVal) {
-      setter(formattedVal);
-      showToast(`${label} に ${formattedVal} を設定しました`);
-    } else {
-      const list = currentVal
+    // 1. Remove this horse from all marks first (1 horse = max 1 mark)
+    for (const def of MARK_DEFINITIONS) {
+      const val = markValues[def.key];
+      if (!val) continue;
+      const tokens = val
         .split(/[,、]\s*/)
         .map((x) => x.trim())
         .filter(Boolean);
-
-      if (list.includes(formattedVal)) {
-        // Toggle off if already selected
-        const updatedList = list.filter((x) => x !== formattedVal);
-        setter(updatedList.join(", "));
-        showToast(`${label} から ${formattedVal} を解除しました`);
-      } else {
-        // Append if not selected
-        setter(`${currentVal}, ${formattedVal}`);
-        showToast(`${label} に ${formattedVal} を追加しました`);
+      const filtered = tokens.filter((t) => !doesTokenMatchHorse(t, horse));
+      const nextVal = filtered.join(", ");
+      if (nextVal !== val && def.key !== newMark) {
+        setters[def.key](nextVal);
       }
+    }
+
+    setOpenMarkDropdownUmaban(null);
+
+    // 2. If clearing mark (-- selected)
+    if (newMark === null) {
+      if (currentMark !== null) {
+        showToast(`${formattedVal} の印を解除しました`);
+      }
+      return;
+    }
+
+    // 3. Add horse to the newly selected mark
+    const targetVal = markValues[newMark];
+    const existingTokens = targetVal
+      ? targetVal
+          .split(/[,、]\s*/)
+          .map((x) => x.trim())
+          .filter(Boolean)
+          .filter((t) => !doesTokenMatchHorse(t, horse))
+      : [];
+    const updatedVal = [...existingTokens, formattedVal].join(", ");
+    setters[newMark](updatedVal);
+
+    const markDef = MARK_DEFINITIONS.find((d) => d.key === newMark);
+    if (currentMark !== newMark && markDef) {
+      showToast(
+        `${markDef.symbol} (${markDef.label}) に ${formattedVal} を設定しました`,
+      );
     }
   };
 
@@ -1599,6 +1768,9 @@ export default function Home() {
     setTaiko(memo.prediction.taiko);
     setAnago(memo.prediction.anago);
     setRenge(memo.prediction.renge);
+    setHoshi(memo.prediction.hoshi || "");
+    setCheck(memo.prediction.check || "");
+    setOpenMarkDropdownUmaban(null);
     setMemoText(memo.memoText);
 
     const honmeiNum = memo.prediction.honmei
@@ -1756,6 +1928,9 @@ export default function Home() {
     setTaiko("");
     setAnago("");
     setRenge("");
+    setHoshi("");
+    setCheck("");
+    setOpenMarkDropdownUmaban(null);
     setMemoText("");
     setTickets([
       { type: "単勝", selection: "", investment: 100, payout: 0, isHit: false },
@@ -1828,7 +2003,7 @@ export default function Home() {
       track,
       raceNumber,
       raceName,
-      prediction: { honmei, taiko, anago, renge },
+      prediction: { honmei, taiko, anago, renge, hoshi, check },
       memoText,
       result: finalResult,
       resultList: scrapedResults,
@@ -1869,6 +2044,9 @@ export default function Home() {
       setTaiko("");
       setAnago("");
       setRenge("");
+      setHoshi("");
+      setCheck("");
+      setOpenMarkDropdownUmaban(null);
       setMemoText("");
       setTickets([
         {
@@ -3181,6 +3359,28 @@ export default function Home() {
                       onChange={(e) => setRenge(e.target.value)}
                     />
                   </div>
+                  <div className={styles.markInputWrapper}>
+                    <span className="mark-badge mark-hoshi active">☆</span>
+                    <input
+                      id="hoshi-input"
+                      type="text"
+                      className="input-control"
+                      placeholder="星・特注馬名 / 馬番 (複数可)"
+                      value={hoshi}
+                      onChange={(e) => setHoshi(e.target.value)}
+                    />
+                  </div>
+                  <div className={styles.markInputWrapper}>
+                    <span className="mark-badge mark-check active">✓</span>
+                    <input
+                      id="check-input"
+                      type="text"
+                      className="input-control"
+                      placeholder="チェック・注意馬名 / 馬番 (複数可)"
+                      value={check}
+                      onChange={(e) => setCheck(e.target.value)}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -3188,7 +3388,7 @@ export default function Home() {
               {fetchedHorses.length > 0 && (
                 <div className={styles.fetchedHorsesSection}>
                   <div className={styles.fetchedHorsesTitle}>
-                    取得された出走馬 (馬番順・クリックで印にコピー)
+                    取得された出走馬 (馬番順・プルダウンで印を選択)
                   </div>
                   <div className={styles.fetchedHorsesList}>
                     {fetchedHorses.map((horse) => {
@@ -3197,6 +3397,12 @@ export default function Home() {
                         text: "var(--text-primary)",
                         border: "transparent",
                       };
+                      const selectedMark = getHorseSelectedMark(horse);
+                      const selectedMarkDef = MARK_DEFINITIONS.find(
+                        (d) => d.key === selectedMark,
+                      );
+                      const isDropdownOpen =
+                        openMarkDropdownUmaban === horse.umaban;
 
                       return (
                         <div
@@ -3256,35 +3462,80 @@ export default function Home() {
                             </span>
                           </div>
 
-                          <div className={styles.quickMarkGroup}>
+                          <div
+                            className={styles.markDropdownWrapper}
+                            data-mark-dropdown="true"
+                          >
                             <button
                               type="button"
-                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnHonmei} ${isHorseMarked(horse, "honmei") ? styles.quickMarkBtnHonmeiActive : ""}`}
-                              onClick={() => handleQuickMark(horse, "honmei")}
+                              className={`${styles.markDropdownTrigger} ${selectedMarkDef ? selectedMarkDef.triggerClass : ""}`}
+                              onClick={() =>
+                                setOpenMarkDropdownUmaban(
+                                  isDropdownOpen ? null : horse.umaban,
+                                )
+                              }
+                              aria-haspopup="listbox"
+                              aria-expanded={isDropdownOpen}
+                              title={`${horse.horseName} の印を選択`}
                             >
-                              ◎
+                              <span
+                                className={styles.markDropdownTriggerSymbol}
+                              >
+                                {selectedMarkDef ? selectedMarkDef.symbol : "--"}
+                              </span>
+                              <span className={styles.markDropdownTriggerArrow}>
+                                ▾
+                              </span>
                             </button>
-                            <button
-                              type="button"
-                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnTaiko} ${isHorseMarked(horse, "taiko") ? styles.quickMarkBtnTaikoActive : ""}`}
-                              onClick={() => handleQuickMark(horse, "taiko")}
-                            >
-                              ◯
-                            </button>
-                            <button
-                              type="button"
-                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnAnago} ${isHorseMarked(horse, "anago") ? styles.quickMarkBtnAnagoActive : ""}`}
-                              onClick={() => handleQuickMark(horse, "anago")}
-                            >
-                              ▲
-                            </button>
-                            <button
-                              type="button"
-                              className={`${styles.quickMarkBtn} ${styles.quickMarkBtnRenge} ${isHorseMarked(horse, "renge") ? styles.quickMarkBtnRengeActive : ""}`}
-                              onClick={() => handleQuickMark(horse, "renge")}
-                            >
-                              △
-                            </button>
+
+                            {isDropdownOpen && (
+                              <div
+                                className={styles.markDropdownMenu}
+                                role="listbox"
+                              >
+                                <button
+                                  type="button"
+                                  role="option"
+                                  aria-selected={selectedMark === null}
+                                  className={`${styles.markDropdownOption} ${selectedMark === null ? styles.markDropdownOptionSelected : ""}`}
+                                  onClick={() =>
+                                    handleSelectHorseMark(horse, null)
+                                  }
+                                >
+                                  <span
+                                    className={styles.markDropdownNoneBadge}
+                                  >
+                                    --
+                                  </span>
+                                  <span>無印</span>
+                                </button>
+                                {MARK_DEFINITIONS.map((def) => (
+                                  <button
+                                    key={def.key}
+                                    type="button"
+                                    role="option"
+                                    aria-selected={selectedMark === def.key}
+                                    className={`${styles.markDropdownOption} ${selectedMark === def.key ? styles.markDropdownOptionSelected : ""}`}
+                                    onClick={() =>
+                                      handleSelectHorseMark(horse, def.key)
+                                    }
+                                  >
+                                    <span
+                                      className={`mark-badge ${def.badgeClass} active`}
+                                      style={{
+                                        width: "22px",
+                                        height: "22px",
+                                        fontSize: "0.75rem",
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      {def.symbol}
+                                    </span>
+                                    <span>{def.label}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -4002,7 +4253,14 @@ export default function Home() {
                                         const mark = getHorseMark(
                                           h.umaban.toString(),
                                           h.horseName,
-                                          { honmei, taiko, anago, renge },
+                                          {
+                                            honmei,
+                                            taiko,
+                                            anago,
+                                            renge,
+                                            hoshi,
+                                            check,
+                                          },
                                         );
                                         if (mark) {
                                           myMarks.push(
@@ -4046,7 +4304,14 @@ export default function Home() {
                                         scrapedHorse
                                           ? scrapedHorse.horseName
                                           : "",
-                                        { honmei, taiko, anago, renge },
+                                        {
+                                          honmei,
+                                          taiko,
+                                          anago,
+                                          renge,
+                                          hoshi,
+                                          check,
+                                        },
                                       );
                                       if (myMark) {
                                         myMarks.push(
@@ -5299,6 +5564,36 @@ export default function Home() {
                                 </span>
                                 <span className={styles.predText}>
                                   {memo.prediction.renge || "無印"}
+                                </span>
+                              </div>
+                              <div className={styles.predItem}>
+                                <span
+                                  className="mark-badge mark-hoshi active"
+                                  style={{
+                                    width: "22px",
+                                    height: "22px",
+                                    fontSize: "0.75rem",
+                                  }}
+                                >
+                                  ☆
+                                </span>
+                                <span className={styles.predText}>
+                                  {memo.prediction.hoshi || "無印"}
+                                </span>
+                              </div>
+                              <div className={styles.predItem}>
+                                <span
+                                  className="mark-badge mark-check active"
+                                  style={{
+                                    width: "22px",
+                                    height: "22px",
+                                    fontSize: "0.75rem",
+                                  }}
+                                >
+                                  ✓
+                                </span>
+                                <span className={styles.predText}>
+                                  {memo.prediction.check || "無印"}
                                 </span>
                               </div>
                             </div>
