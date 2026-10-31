@@ -973,4 +973,174 @@
   background: rgba(255, 255, 255, 0.04);
 }
 
+/* Export / Import Controls & Modal */
+.dataActions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
 
+.dataActionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: rgba(31, 41, 55, 0.75);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dataActionBtn:hover {
+  background: rgba(55, 65, 81, 0.9);
+  border-color: var(--border-color-hover);
+  transform: translateY(-1px);
+}
+
+.dataActionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(9, 13, 22, 0.78);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  animation: fadeIn 0.2s ease forwards;
+}
+
+.modalCard {
+  width: 100%;
+  max-width: 520px;
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.85rem;
+}
+
+.modalTitle {
+  font-size: 1.15rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.modalCloseBtn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.modalCloseBtn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dropzone {
+  border: 2px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  padding: 1.5rem 1rem;
+  text-align: center;
+  background: rgba(17, 24, 39, 0.5);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dropzone > * {
+  pointer-events: none;
+}
+
+.dropzone:hover,
+.dropzoneActive {
+  border-color: var(--color-emerald);
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.importPreviewCard {
+  background: rgba(31, 41, 55, 0.5);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.modeSelector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.modeOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: rgba(17, 24, 39, 0.4);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modeOption:hover {
+  border-color: var(--border-color-hover);
+  background: rgba(31, 41, 55, 0.5);
+}
+
+.modeOptionActive {
+  border-color: var(--color-emerald);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.modeOptionDangerActive {
+  border-color: var(--color-rose);
+  background: rgba(244, 63, 94, 0.08);
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-color);
+}
