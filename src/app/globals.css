@@ -318,6 +318,34 @@ h6 {
   box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
 }
 
+.mark-hoshi {
+  /* ☆ */
+  background: rgba(236, 72, 153, 0.15);
+  color: #ec4899;
+  border-color: rgba(236, 72, 153, 0.3);
+}
+.mark-hoshi.active,
+.mark-hoshi:hover {
+  background: linear-gradient(135deg, #ec4899 0%, #db2777 100%);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.3);
+}
+
+.mark-check {
+  /* ✓ */
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--color-emerald);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.mark-check.active,
+.mark-check:hover {
+  background: var(--grad-primary);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+}
+
 /* Animations */
 @keyframes fadeIn {
   from {

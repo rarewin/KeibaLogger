@@ -307,11 +307,17 @@
 
 .predictionsBox {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.5rem;
   background: rgba(17, 24, 39, 0.6);
   padding: 0.75rem;
   border-radius: 8px;
+}
+
+@media (max-width: 640px) {
+  .predictionsBox {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 @media (max-width: 480px) {
@@ -457,71 +463,147 @@
   color: var(--text-primary);
 }
 
-.quickMarkGroup {
-  display: flex;
-  gap: 0.25rem;
+.markDropdownWrapper {
+  position: relative;
+  display: inline-flex;
 }
 
-.quickMarkBtn {
+.markDropdownTrigger {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  font-size: 0.7rem;
-  font-weight: 700;
+  justify-content: space-between;
+  gap: 0.25rem;
+  min-width: 52px;
+  height: 28px;
+  padding: 0 0.45rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 800;
   border: 1px solid var(--border-color);
   background: var(--bg-tertiary);
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
+  user-select: none;
 }
 
-@media (hover: hover) {
-  .quickMarkBtn:hover {
-    background: var(--text-muted);
-    color: #fff;
-    border-color: transparent;
-  }
-  .quickMarkBtnHonmei:hover {
-    background: var(--grad-gold);
-    color: #111827;
-  }
-  .quickMarkBtnTaiko:hover {
-    background: var(--grad-rose);
-    color: #ffffff;
-  }
-  .quickMarkBtnAnago:hover {
-    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
-    color: #ffffff;
-  }
-  .quickMarkBtnRenge:hover {
-    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-    color: #ffffff;
-  }
+.markDropdownTrigger:hover {
+  border-color: var(--border-color-hover);
+  background: rgba(55, 65, 81, 0.85);
+  color: var(--text-primary);
 }
 
-/* Active styles when a horse is marked */
-.quickMarkBtnHonmeiActive {
-  background: var(--grad-gold) !important;
-  color: #111827 !important;
-  border-color: transparent !important;
+.markDropdownTriggerSymbol {
+  flex: 1;
+  text-align: center;
+  line-height: 1;
 }
-.quickMarkBtnTaikoActive {
-  background: var(--grad-rose) !important;
-  color: #ffffff !important;
-  border-color: transparent !important;
+
+.markDropdownTriggerArrow {
+  font-size: 0.6rem;
+  opacity: 0.75;
+  line-height: 1;
 }
-.quickMarkBtnAnagoActive {
-  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%) !important;
-  color: #ffffff !important;
-  border-color: transparent !important;
+
+/* Active styles when a horse has a mark selected in the dropdown */
+.markDropdownTrigger.markTriggerHonmei,
+.markDropdownTrigger.markTriggerHonmei:hover {
+  background: var(--grad-gold);
+  color: #111827;
+  border-color: transparent;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
 }
-.quickMarkBtnRengeActive {
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
-  color: #ffffff !important;
-  border-color: transparent !important;
+.markDropdownTrigger.markTriggerTaiko,
+.markDropdownTrigger.markTriggerTaiko:hover {
+  background: var(--grad-rose);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 0 8px rgba(244, 63, 94, 0.3);
+}
+.markDropdownTrigger.markTriggerAnago,
+.markDropdownTrigger.markTriggerAnago:hover {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.3);
+}
+.markDropdownTrigger.markTriggerRenge,
+.markDropdownTrigger.markTriggerRenge:hover {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+}
+.markDropdownTrigger.markTriggerHoshi,
+.markDropdownTrigger.markTriggerHoshi:hover {
+  background: linear-gradient(135deg, #ec4899 0%, #db2777 100%);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 0 8px rgba(236, 72, 153, 0.3);
+}
+.markDropdownTrigger.markTriggerCheck,
+.markDropdownTrigger.markTriggerCheck:hover {
+  background: var(--grad-primary);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+}
+
+.markDropdownMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 60;
+  min-width: 136px;
+  background: #111827;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  padding: 0.35rem;
+  box-shadow: 0 12px 28px -4px rgba(0, 0, 0, 0.65);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.markDropdownOption {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.markDropdownOption:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.markDropdownOptionSelected {
+  background: rgba(59, 130, 246, 0.18);
+  color: #ffffff;
+}
+
+.markDropdownNoneBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
 /* Dynamic Ticket List Form */

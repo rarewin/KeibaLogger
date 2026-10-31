@@ -37,6 +37,8 @@ export interface MemoData {
     taiko: string;
     anago: string;
     renge: string;
+    hoshi: string;
+    check: string;
   };
   memoText: string;
   result: "hit" | "miss" | "pending";
@@ -49,9 +51,35 @@ export interface MemoData {
 
 export type ImportMode = "merge" | "replace";
 
+let extraMarkColumnsEnsured = false;
+
+async function ensureExtraMarkColumns() {
+  if (extraMarkColumnsEnsured) return;
+  try {
+    const cols = await prisma.$queryRawUnsafe<{ name: string }[]>(
+      `PRAGMA table_info("Memo")`,
+    );
+    const colNames = new Set(cols.map((c) => c.name));
+    if (!colNames.has("hoshi")) {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "Memo" ADD COLUMN "hoshi" TEXT NOT NULL DEFAULT ''`,
+      );
+    }
+    if (!colNames.has("check")) {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "Memo" ADD COLUMN "check" TEXT NOT NULL DEFAULT ''`,
+      );
+    }
+    extraMarkColumnsEnsured = true;
+  } catch (e) {
+    console.warn("Failed to ensure extra mark columns on Memo:", e);
+  }
+}
 // Get all memos from SQLite, including their tickets and parsed results
 export async function getMemos(): Promise<MemoData[]> {
   try {
+    await ensureExtraMarkColumns();
+
     const memos = await prisma.memo.findMany({
       include: {
         tickets: true,
@@ -60,6 +88,16 @@ export async function getMemos(): Promise<MemoData[]> {
         createdAt: "desc",
       },
     });
+
+    const extraMarksRows = await prisma.$queryRawUnsafe<
+      { id: string; hoshi: string | null; check: string | null }[]
+    >(`SELECT "id", "hoshi", "check" FROM "Memo"`);
+    const extraMarksMap = new Map(
+      extraMarksRows.map((r) => [
+        r.id,
+        { hoshi: r.hoshi || "", check: r.check || "" },
+      ]),
+    );
 
     // Format output to match client-side structured schema
     return memos.map((m) => {
@@ -77,6 +115,8 @@ export async function getMemos(): Promise<MemoData[]> {
         console.warn("Failed to parse fetchedHorses JSON:", e);
       }
 
+      const extraMarks = extraMarksMap.get(m.id);
+
       return {
         id: m.id,
         date: m.date,
@@ -88,6 +128,8 @@ export async function getMemos(): Promise<MemoData[]> {
           taiko: m.taiko,
           anago: m.anago,
           renge: m.renge,
+          hoshi: extraMarks?.hoshi ?? "",
+          check: extraMarks?.check ?? "",
         },
         memoText: m.memoText,
         result: m.result as "hit" | "miss" | "pending",
@@ -114,6 +156,8 @@ export async function getMemos(): Promise<MemoData[]> {
 // Add or Update a memo with its tickets and results in SQLite
 export async function saveMemo(data: Omit<MemoData, "id"> & { id?: string }) {
   try {
+    await ensureExtraMarkColumns();
+
     const serializedResults = data.resultList
       ? JSON.stringify(data.resultList)
       : "[]";
@@ -163,6 +207,14 @@ export async function saveMemo(data: Omit<MemoData, "id"> & { id?: string }) {
           },
         });
       });
+
+      await prisma.$executeRawUnsafe(
+        `UPDATE "Memo" SET "hoshi" = ?, "check" = ? WHERE "id" = ?`,
+        data.prediction.hoshi || "",
+        data.prediction.check || "",
+        memo.id,
+      );
+
       revalidatePath("/");
       return { success: true, id: memo.id };
     }
@@ -182,6 +234,14 @@ export async function saveMemo(data: Omit<MemoData, "id"> & { id?: string }) {
         },
       },
     });
+
+    await prisma.$executeRawUnsafe(
+      `UPDATE "Memo" SET "hoshi" = ?, "check" = ? WHERE "id" = ?`,
+      data.prediction.hoshi || "",
+      data.prediction.check || "",
+      memo.id,
+    );
+
     revalidatePath("/");
     return { success: true, id: memo.id };
   } catch (error) {
@@ -222,6 +282,8 @@ interface NormalizedMemoInput {
   taiko: string;
   anago: string;
   renge: string;
+  hoshi: string;
+  check: string;
   memoText: string;
   result: "hit" | "miss" | "pending";
   resultList: string;
@@ -303,6 +365,18 @@ function normalizeImportMemos(payload: unknown): NormalizedMemoInput[] {
         : typeof rec.renge === "string"
           ? rec.renge
           : "";
+    const hoshi =
+      typeof prediction.hoshi === "string"
+        ? prediction.hoshi
+        : typeof rec.hoshi === "string"
+          ? rec.hoshi
+          : "";
+    const check =
+      typeof prediction.check === "string"
+        ? prediction.check
+        : typeof rec.check === "string"
+          ? rec.check
+          : "";
 
     const rawResult = typeof rec.result === "string" ? rec.result : "pending";
     const result: "hit" | "miss" | "pending" =
@@ -371,6 +445,8 @@ function normalizeImportMemos(payload: unknown): NormalizedMemoInput[] {
       taiko,
       anago,
       renge,
+      hoshi,
+      check,
       memoText: typeof rec.memoText === "string" ? rec.memoText : "",
       result,
       resultList: serializedResults,
@@ -397,6 +473,8 @@ export async function importMemos(
   error?: string;
 }> {
   try {
+    await ensureExtraMarkColumns();
+
     const normalizedMemos = normalizeImportMemos(payload);
 
     let addedCount = 0;
@@ -412,7 +490,7 @@ export async function importMemos(
           const useId = m.id && !seenIds.has(m.id) ? m.id : undefined;
           if (useId) seenIds.add(useId);
 
-          await tx.memo.create({
+          const memo = await tx.memo.create({
             data: {
               ...(useId ? { id: useId } : {}),
               date: m.date,
@@ -434,6 +512,16 @@ export async function importMemos(
               },
             },
           });
+
+          if (m.hoshi || m.check) {
+            await tx.$executeRawUnsafe(
+              `UPDATE "Memo" SET "hoshi" = ?, "check" = ? WHERE "id" = ?`,
+              m.hoshi,
+              m.check,
+              memo.id,
+            );
+          }
+
           addedCount++;
         }
       } else {
@@ -474,12 +562,18 @@ export async function importMemos(
                   },
                 },
               });
+              await tx.$executeRawUnsafe(
+                `UPDATE "Memo" SET "hoshi" = ?, "check" = ? WHERE "id" = ?`,
+                m.hoshi,
+                m.check,
+                m.id,
+              );
               updatedCount++;
               continue;
             }
           }
 
-          await tx.memo.create({
+          const memo = await tx.memo.create({
             data: {
               ...(m.id ? { id: m.id } : {}),
               ...dbFields,
@@ -489,6 +583,16 @@ export async function importMemos(
               },
             },
           });
+
+          if (m.hoshi || m.check) {
+            await tx.$executeRawUnsafe(
+              `UPDATE "Memo" SET "hoshi" = ?, "check" = ? WHERE "id" = ?`,
+              m.hoshi,
+              m.check,
+              memo.id,
+            );
+          }
+
           addedCount++;
         }
       }
