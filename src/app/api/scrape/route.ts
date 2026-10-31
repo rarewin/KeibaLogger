@@ -1,5 +1,135 @@
 import { NextRequest, NextResponse } from "next/server";
+import dns from "node:dns";
+import http from "node:http";
+import https from "node:https";
 import iconv from "iconv-lite";
+
+// Fast DNS resolver that avoids stalling if the primary OS nameserver is unresponsive
+const fastResolver = new dns.promises.Resolver({ timeout: 1500, tries: 1 });
+try {
+  const currentServers = dns.getServers();
+  const preferredServers = ["1.1.1.1", "8.8.8.8"];
+  const merged = [
+    ...preferredServers,
+    ...currentServers.filter((s) => !preferredServers.includes(s)),
+  ];
+  fastResolver.setServers(merged);
+} catch {
+  // Ignore resolver initialization errors and fall back to OS lookup
+}
+
+function customDnsLookup(
+  hostname: string,
+  options: dns.LookupOptions | ((err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void),
+  callback?: (err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void,
+) {
+  const cb = typeof options === "function" ? options : callback!;
+  const opts: dns.LookupOptions = typeof options === "function" ? {} : options || {};
+
+  fastResolver
+    .resolve4(hostname)
+    .then((addresses) => {
+      if (!addresses || addresses.length === 0) {
+        dns.lookup(hostname, opts, cb as any);
+        return;
+      }
+      if (opts.all) {
+        cb(
+          null,
+          addresses.map((address) => ({ address, family: 4 })),
+        );
+      } else {
+        cb(null, addresses[0], 4);
+      }
+    })
+    .catch(() => {
+      dns.lookup(hostname, opts, cb as any);
+    });
+}
+
+async function fetchHttpBuffer(
+  urlStr: string,
+  timeoutMs = 8000,
+  redirectCount = 0,
+): Promise<{
+  ok: boolean;
+  status: number;
+  headers: http.IncomingHttpHeaders;
+  buffer: Buffer;
+}> {
+  if (redirectCount > 5) {
+    throw new Error("Too many redirects");
+  }
+
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(urlStr);
+    const client = parsedUrl.protocol === "https:" ? https : http;
+
+    const req = client.get(
+      parsedUrl,
+      {
+        lookup: customDnsLookup as any,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        const statusCode = res.statusCode || 0;
+        if (
+          statusCode >= 300 &&
+          statusCode < 400 &&
+          res.headers.location
+        ) {
+          const nextUrl = new URL(res.headers.location, urlStr).toString();
+          res.resume();
+          fetchHttpBuffer(nextUrl, timeoutMs, redirectCount + 1).then(
+            resolve,
+            reject,
+          );
+          return;
+        }
+
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          resolve({
+            ok: statusCode >= 200 && statusCode < 300,
+            status: statusCode,
+            headers: res.headers,
+            buffer: Buffer.concat(chunks),
+          });
+        });
+      },
+    );
+
+    req.on("timeout", () => {
+      req.destroy(new Error(`Request timed out after ${timeoutMs}ms: ${urlStr}`));
+    });
+    req.on("error", reject);
+  });
+}
+
+function decodeHtmlBuffer(
+  buffer: Buffer,
+  contentTypeHeader?: string | string[],
+): string {
+  const ct = Array.isArray(contentTypeHeader)
+    ? contentTypeHeader.join("; ")
+    : contentTypeHeader || "";
+  if (/euc-jp/i.test(ct)) {
+    return iconv.decode(buffer, "euc-jp");
+  }
+  const headAscii = buffer.subarray(0, 1024).toString("ascii");
+  if (/charset=["']?\s*euc-jp/i.test(headAscii)) {
+    return iconv.decode(buffer, "euc-jp");
+  }
+  return buffer.toString("utf-8");
+}
 
 // JRA Race Tracks Map
 const JRA_TRACKS: Record<string, string> = {
@@ -45,27 +175,27 @@ const NAR_TRACKS: Record<string, string> = {
   "55": "佐賀",
   "56": "荒尾",
   "57": "中津",
-  "58": "札幌",
-  "59": "函館",
-  "60": "新潟",
-  "61": "中京",
+  "58": "札幌(地方)",
+  "59": "函館(地方)",
+  "60": "新潟(地方)",
+  "61": "中京(地方)",
   "62": "春木",
-  "63": "北見",
-  "64": "岩見沢",
+  "63": "北見(地方)",
+  "64": "岩見沢(地方)",
   "65": "ばんえい帯広",
 };
 
 const ALL_TRACKS: Record<string, string> = {
-  ...JRA_TRACKS,
   ...NAR_TRACKS,
+  ...JRA_TRACKS,
 };
 
-// Reverse map from track name to track code
+// Reverse map from track name to track code (JRA takes priority over NAR)
 const TRACK_NAME_TO_CODE: Record<string, string> = {};
-for (const [code, name] of Object.entries(JRA_TRACKS)) {
+for (const [code, name] of Object.entries(NAR_TRACKS)) {
   TRACK_NAME_TO_CODE[name] = code;
 }
-for (const [code, name] of Object.entries(NAR_TRACKS)) {
+for (const [code, name] of Object.entries(JRA_TRACKS)) {
   TRACK_NAME_TO_CODE[name] = code;
 }
 TRACK_NAME_TO_CODE["帯広"] = "65";
@@ -92,100 +222,6 @@ function isNarTarget(target: string, raceId: string | null): boolean {
   }
   return false;
 }
-
-// Modern JRA Sprinters Mock Pool
-const MOCK_SPRINTERS = [
-  "ナムラクレア",
-  "マッドクール",
-  "トウシンマカオ",
-  "ママコチャ",
-  "ウインマーベル",
-  "ルガル",
-  "ピューロマジック",
-  "サトノレーヴ",
-  "ビッグシーザー",
-  "アサカラキング",
-  "ジャスティンミラノ",
-  "エイシンスポッター",
-  "モズメイメイ",
-];
-
-// Modern JRA Middle/Long Distance Mock Pool
-const MOCK_MID_LONG = [
-  "ドウデュース",
-  "ジャスティンパレス",
-  "ベラジオオペラ",
-  "ブローザホーン",
-  "ソールオリエンス",
-  "タスティエーラ",
-  "レガレイラ",
-  "ローシャムパーク",
-  "ステラヴェローチェ",
-  "プログノーシス",
-  "ダノンデサイル",
-  "アスコリピチェーノ",
-];
-
-// Major JRA 11R Races by Track Code
-const MAIN_RACES_BY_TRACK: Record<string, string[]> = {
-  "01": [
-    "札幌記念 (G2)",
-    "クイーンステークス (G3)",
-    "エルムステークス (G3)",
-    "キーンランドカップ (G3)",
-  ],
-  "02": [
-    "函館記念 (G3)",
-    "函館スプリントステークス (G3)",
-    "函館2歳ステークス (G3)",
-  ],
-  "03": [
-    "七夕賞 (G3)",
-    "ラジオNIKKEI賞 (G3)",
-    "福島記念 (G3)",
-    "福島牝馬ステークス (G3)",
-  ],
-  "04": ["新潟記念 (G3)", "関屋記念 (G3)", "アイビスサマーダッシュ (G3)"],
-  "05": [
-    "日本ダービー (G1)",
-    "ジャパンカップ (G1)",
-    "天皇賞・秋 (G1)",
-    "安田記念 (G1)",
-    "オークス (G1)",
-    "NHKマイルカップ (G1)",
-    "フェブラリーステークス (G1)",
-    "ヴィクトリアマイル (G1)",
-  ],
-  "06": [
-    "有馬記念 (G1)",
-    "皐月賞 (G1)",
-    "スプリンターズステークス (G1)",
-    "ホープフルステークス (G1)",
-    "中山記念 (G2)",
-  ],
-  "07": [
-    "高松宮記念 (G1)",
-    "チャンピオンズカップ (G1)",
-    "金鯱賞 (G2)",
-    "プロキオンステークス (G3)",
-    "中京記念 (G3)",
-  ],
-  "08": [
-    "天皇賞・春 (G1)",
-    "菊花賞 (G1)",
-    "秋華賞 (G1)",
-    "エリザベス女王杯 (G1)",
-    "マイルチャンピオンシップ (G1)",
-  ],
-  "09": [
-    "宝塚記念 (G1)",
-    "桜花賞 (G1)",
-    "阪神ジュベナイルフィリーズ (G1)",
-    "朝日杯フューチュリティステークス (G1)",
-    "大阪杯 (G1)",
-  ],
-  "10": ["小倉記念 (G3)", "北九州記念 (G3)", "小倉2歳ステークス (G3)"],
-};
 
 interface HorseDetail {
   waku: number;
@@ -453,6 +489,7 @@ async function resolveRaceId(
 
   const normalizedTrack = normalizeTrackName(trackName);
   const trackCode = TRACK_NAME_TO_CODE[normalizedTrack];
+  const jraTrackName = trackCode ? JRA_TRACKS[trackCode] : undefined;
 
   // 1. If it's a known NAR track, construct predictable NAR race ID
   if (trackCode && parseInt(trackCode, 10) >= 30) {
@@ -466,18 +503,36 @@ async function resolveRaceId(
     };
   }
 
-  // 2. Query race.netkeiba.com/top/race_list_sub.html?kaisai_date=YYYYMMDD (JRA live/recent, UTF-8)
+  // 2. Query race.netkeiba.com/top/race_list_sub.html?kaisai_date=YYYYMMDD (JRA live/recent/archive, UTF-8)
   try {
     const subUrl = `https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=${yyyymmdd}`;
-    const res = await fetch(subUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-      signal: AbortSignal.timeout(4000),
-    });
+    const res = await fetchHttpBuffer(subUrl, 8000);
     if (res.ok) {
-      const html = await res.text();
+      const html = decodeHtmlBuffer(res.buffer, res.headers["content-type"]);
+
+      // 2A. Direct pattern match by year + trackCode + kai/day + raceNumPadded
+      if (trackCode) {
+        const directIdRegex = new RegExp(
+          `race_id=(${year}${trackCode}\\d{4}${raceNumPadded})\\b`,
+        );
+        const directMatch = html.match(directIdRegex);
+        if (directMatch) {
+          const foundId = directMatch[1];
+          const isNar = parseInt(foundId.substring(4, 6), 10) >= 30;
+          const domain = isNar
+            ? "https://nar.netkeiba.com"
+            : "https://race.netkeiba.com";
+          return {
+            raceId: foundId,
+            isNar,
+            url: `${domain}/race/result.html?race_id=${foundId}`,
+            track: ALL_TRACKS[trackCode] || normalizedTrack,
+            raceNumber: String(raceNum),
+          };
+        }
+      }
+
+      // 2B. Fallback: Match by RaceList_DataList section header
       const dlMatches = [
         ...html.matchAll(
           /<dl class=["']RaceList_DataList[^"']*["'][^>]*>([\s\S]*?)<\/dl>/g,
@@ -493,9 +548,9 @@ async function resolveRaceId(
           : "";
 
         const matchesTrack =
-          headerText.includes(normalizedTrack) ||
-          normalizedTrack.includes(headerText) ||
-          (trackCode && headerText.includes(JRA_TRACKS[trackCode] || ""));
+          Boolean(headerText) &&
+          ((Boolean(normalizedTrack) && headerText.includes(normalizedTrack)) ||
+            (Boolean(jraTrackName) && headerText.includes(jraTrackName!)));
 
         if (matchesTrack) {
           const raceItemMatches = [
@@ -535,20 +590,36 @@ async function resolveRaceId(
     // continue to db.netkeiba
   }
 
-  // 3. Query db.netkeiba.com/race/list/YYYYMMDD/ (JRA archive, EUC-JP)
+  // 3. Query db.netkeiba.com/race/list/YYYYMMDD/ (JRA/NAR archive, EUC-JP)
   try {
     const dbUrl = `https://db.netkeiba.com/race/list/${yyyymmdd}/`;
-    const res = await fetch(dbUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-      signal: AbortSignal.timeout(4000),
-    });
+    const res = await fetchHttpBuffer(dbUrl, 8000);
     if (res.ok) {
-      const buffer = await res.arrayBuffer();
-      const html = iconv.decode(Buffer.from(buffer), "euc-jp");
+      const html = iconv.decode(res.buffer, "euc-jp");
 
+      // 3A. Direct pattern match by year + trackCode + kai/day + raceNumPadded
+      if (trackCode) {
+        const directDbRegex = new RegExp(
+          `\\/race\\/(${year}${trackCode}\\d{4}${raceNumPadded})\\/`,
+        );
+        const directDbMatch = html.match(directDbRegex);
+        if (directDbMatch) {
+          const foundId = directDbMatch[1];
+          const isNar = parseInt(foundId.substring(4, 6), 10) >= 30;
+          const domain = isNar
+            ? "https://nar.netkeiba.com"
+            : "https://race.netkeiba.com";
+          return {
+            raceId: foundId,
+            isNar,
+            url: `${domain}/race/result.html?race_id=${foundId}`,
+            track: ALL_TRACKS[trackCode] || normalizedTrack,
+            raceNumber: String(raceNum),
+          };
+        }
+      }
+
+      // 3B. Fallback: Match by race_top_hold_list section header
       const holdSections = html.split('<dl class="race_top_hold_list">');
       for (let i = 1; i < holdSections.length; i++) {
         const section = holdSections[i];
@@ -560,9 +631,11 @@ async function resolveRaceId(
           : "";
 
         const matchesTrack =
-          sectionTrack.includes(normalizedTrack) ||
-          normalizedTrack.includes(sectionTrack) ||
-          (trackCode && sectionTrack.includes(JRA_TRACKS[trackCode] || ""));
+          Boolean(sectionTrack) &&
+          ((Boolean(normalizedTrack) &&
+            (sectionTrack.includes(normalizedTrack) ||
+              normalizedTrack.includes(sectionTrack))) ||
+            (Boolean(jraTrackName) && sectionTrack.includes(jraTrackName!)));
 
         if (matchesTrack) {
           const racePattern = new RegExp(
@@ -619,18 +692,12 @@ export async function GET(request: NextRequest) {
       resolvedTrack = resolved.track;
       resolvedRaceNumber = resolved.raceNumber;
     } else {
-      // Offline / fallback ID construction if track code is recognized
-      const norm = normalizeTrackName(paramTrack);
-      const trackCode = TRACK_NAME_TO_CODE[norm];
-      const yyyymmdd = paramDate.replace(/[-/]/g, "");
-      const isNarTrack = trackCode && parseInt(trackCode, 10) >= 30;
-      if (trackCode && isNarTrack) {
-        const fallbackNarId = `${yyyymmdd.substring(0, 4)}${trackCode}${yyyymmdd.substring(4, 8)}${String(paramRaceNumber).padStart(2, "0")}`;
-        target = `https://nar.netkeiba.com/race/result.html?race_id=${fallbackNarId}`;
-      } else if (trackCode) {
-        const fallbackJraId = `${yyyymmdd.substring(0, 4)}${trackCode}0101${String(paramRaceNumber).padStart(2, "0")}`;
-        target = `https://race.netkeiba.com/race/result.html?race_id=${fallbackJraId}`;
-      }
+      return NextResponse.json(
+        {
+          error: `「${paramDate} ${paramTrack} ${paramRaceNumber}R」のレース情報が見つかりませんでした。開催日や開催場をご確認ください。`,
+        },
+        { status: 404 },
+      );
     }
   }
 
@@ -678,18 +745,10 @@ export async function GET(request: NextRequest) {
   } | null = null;
 
   try {
-    const fetchOptions = {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-      signal: AbortSignal.timeout(6000),
-    };
-
-    let res = await fetch(fetchUrl, fetchOptions);
+    const res = await fetchHttpBuffer(fetchUrl, 8000);
     let html = "";
     if (res.ok) {
-      html = await res.text();
+      html = decodeHtmlBuffer(res.buffer, res.headers["content-type"]);
     }
 
     let horses = extractHorsesWithDetails(html);
@@ -701,13 +760,16 @@ export async function GET(request: NextRequest) {
       horseName: string;
     }[] = [];
 
-    // If result page failed to return horses (e.g. race not yet held, page doesn't exist), fallback to entries page
+    // If result page failed to return horses (e.g. race not yet held), fallback to entries page
     if (horses.length === 0 && isResultFetch && raceId) {
       isResultFetch = false;
       fetchUrl = `${domain}/race/shutuba.html?race_id=${raceId}`;
-      const retryRes = await fetch(fetchUrl, fetchOptions);
+      const retryRes = await fetchHttpBuffer(fetchUrl, 8000);
       if (retryRes.ok) {
-        const retryHtml = await retryRes.text();
+        const retryHtml = decodeHtmlBuffer(
+          retryRes.buffer,
+          retryRes.headers["content-type"],
+        );
         horses = extractHorsesWithDetails(retryHtml);
         const retryTitle = extractTitle(retryHtml);
         if (retryTitle) {
@@ -794,164 +856,18 @@ export async function GET(request: NextRequest) {
       }
     }
   } catch (e) {
-    console.warn("Real-time scraping failed, falling back to mock:", e);
+    console.warn("Real-time scraping failed:", e);
   }
 
   if (scrapedData) {
     return NextResponse.json(scrapedData);
   }
 
-  // Smart Fallback Mock Generator
-  if (raceId) {
-    const trackCode = raceId.substring(4, 6);
-    const raceNumCode = raceId.substring(10, 12);
-    const isNar = isNarTarget(target, raceId);
-
-    const track =
-      resolvedTrack || ALL_TRACKS[trackCode] || (isNar ? "大井" : "東京");
-    const raceNumber =
-      resolvedRaceNumber || parseInt(raceNumCode, 10).toString();
-    const yyyy = raceId.substring(0, 4);
-
-    let dateStr = "";
-    if (resolvedDate) {
-      dateStr = resolvedDate;
-    } else if (isNar) {
-      const mm = raceId.substring(6, 8);
-      const dd = raceId.substring(8, 10);
-      dateStr = `${yyyy}-${mm}-${dd}`;
-    } else {
-      const today = new Date();
-      const mm = String(today.getMonth() + 1).padStart(2, "0");
-      const dd = String(today.getDate()).padStart(2, "0");
-      dateStr = `${yyyy}-${mm}-${dd}`;
-    }
-
-    const isSprint =
-      (trackCode === "10" && raceNumber === "11") ||
-      (trackCode === "04" && raceNumber === "11") ||
-      (trackCode === "02" && raceNumber === "11");
-
-    const pool = isNar
-      ? [
-          "ミックファイア",
-          "ウシュバテソーロ",
-          "メイショウハリオ",
-          "ウィルソンテソーロ",
-          "クラウンプライド",
-          "ディクテオン",
-          "デルマソトガケ",
-          "フォーエバーヤング",
-          "ライトウォーリア",
-          "キングズソード",
-        ]
-      : isSprint
-        ? MOCK_SPRINTERS
-        : MOCK_MID_LONG;
-
-    const mockJockeys = isNar
-      ? [
-          "笹川翼",
-          "森泰斗",
-          "矢野貴之",
-          "吉原寛人",
-          "御神本訓",
-          "赤岡修次",
-          "本田正重",
-          "町田直希",
-        ]
-      : [
-          "ルメール",
-          "川田将雅",
-          "武豊",
-          "戸崎圭太",
-          "坂井瑠星",
-          "横山武史",
-          "松山弘平",
-          "デムーロ",
-        ];
-
-    const seed = parseInt(raceId.substring(6, 12), 10) || 123456;
-    const shuffledHorses = [...pool].sort((a, b) => {
-      const hashA = (a.charCodeAt(0) * seed) % 100;
-      const hashB = (b.charCodeAt(0) * seed) % 100;
-      return hashA - hashB;
-    });
-
-    const selectedHorses = shuffledHorses.slice(0, 8);
-    const mockHorsesWithDetails = selectedHorses.map((name, index) => {
-      const umaban = index + 1;
-      const waku = umaban <= 8 ? umaban : Math.min(8, Math.ceil(umaban / 2));
-      return {
-        waku,
-        umaban,
-        horseName: name,
-        jockey: mockJockeys[index % mockJockeys.length],
-      };
-    });
-
-    let raceName = `${track}第${raceNumber}レース`;
-    if (raceNumber === "11" && !isNar) {
-      const candidates = MAIN_RACES_BY_TRACK[trackCode];
-      if (candidates && candidates.length > 0) {
-        const seedVal = parseInt(raceId.substring(6, 10), 10) || 0;
-        const idx = (seedVal + 1) % candidates.length;
-        raceName = candidates[idx];
-      }
-    }
-
-    const mockResults = [
-      {
-        rank: 1,
-        horseNumber: "1",
-        horseName: selectedHorses[0] || (isNar ? "ミックファイア" : "ドウデュース"),
-        jockey: mockJockeys[0],
-      },
-      {
-        rank: 2,
-        horseNumber: "2",
-        horseName: selectedHorses[1] || (isNar ? "ウシュバテソーロ" : "イクイノックス"),
-        jockey: mockJockeys[1],
-      },
-      {
-        rank: 3,
-        horseNumber: "3",
-        horseName: selectedHorses[2] || (isNar ? "メイショウハリオ" : "リバティアイランド"),
-        jockey: mockJockeys[2],
-      },
-    ];
-
-    return NextResponse.json({
-      success: true,
-      source: "id-parser-mock",
-      url: `${domain}/race/result.html?race_id=${raceId}`,
-      date: dateStr,
-      track,
-      raceNumber,
-      raceName,
-      horses: mockHorsesWithDetails,
-      results: mockResults,
-    });
-  }
-
-  return NextResponse.json({
-    success: true,
-    source: "generic-mock",
-    url: "https://race.netkeiba.com/race/result.html?race_id=202405040811",
-    date: new Date().toISOString().split("T")[0],
-    track: "東京",
-    raceNumber: "11",
-    raceName: "ジェミニステークス",
-    horses: [
-      { waku: 1, umaban: 1, horseName: "ドウデュース", jockey: "武豊" },
-      { waku: 2, umaban: 2, horseName: "イクイノックス", jockey: "ルメール" },
-      {
-        waku: 3,
-        umaban: 3,
-        horseName: "リバティアイランド",
-        jockey: "川田将雅",
-      },
-      { waku: 4, umaban: 4, horseName: "プログノーシス", jockey: "戸崎圭太" },
-    ],
-  });
+  return NextResponse.json(
+    {
+      error:
+        "レース情報の取得に失敗しました。開催日・開催場・レース番号またはURLをご確認ください。",
+    },
+    { status: 404 },
+  );
 }
