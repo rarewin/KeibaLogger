@@ -721,16 +721,6 @@ export async function GET(request: NextRequest) {
     ? "https://nar.netkeiba.com"
     : "https://race.netkeiba.com";
 
-  // Default to fetching result page first to check if race is finished and get payouts
-  let fetchUrl = target;
-  let isResultFetch = false;
-  if (raceId) {
-    fetchUrl = `${domain}/race/result.html?race_id=${raceId}`;
-    isResultFetch = true;
-  } else if (target.includes("result.html")) {
-    isResultFetch = true;
-  }
-
   let scrapedData: {
     success: boolean;
     source: string;
@@ -745,41 +735,68 @@ export async function GET(request: NextRequest) {
   } | null = null;
 
   try {
-    const res = await fetchHttpBuffer(fetchUrl, 8000);
-    let html = "";
-    if (res.ok) {
-      html = decodeHtmlBuffer(res.buffer, res.headers["content-type"]);
-    }
+    let shutubaHtml = "";
+    let resultHtml = "";
 
-    let horses = extractHorsesWithDetails(html);
-    let title = extractTitle(html);
-    let payouts: Record<string, { selection: string; amount: number }[]> = {};
-    let resultsList: {
-      rank: number;
-      horseNumber: string;
-      horseName: string;
-    }[] = [];
+    // When raceId is known, fetch both entries and results in parallel:
+    // shutuba.html provides the complete, authoritative runner list (avoiding partial lists during race flash updates)
+    // result.html provides payouts and official finishing order (if already run)
+    if (raceId) {
+      const shutubaUrl = `${domain}/race/shutuba.html?race_id=${raceId}`;
+      const resultUrl = `${domain}/race/result.html?race_id=${raceId}`;
 
-    // If result page failed to return horses (e.g. race not yet held), fallback to entries page
-    if (horses.length === 0 && isResultFetch && raceId) {
-      isResultFetch = false;
-      fetchUrl = `${domain}/race/shutuba.html?race_id=${raceId}`;
-      const retryRes = await fetchHttpBuffer(fetchUrl, 8000);
-      if (retryRes.ok) {
-        const retryHtml = decodeHtmlBuffer(
-          retryRes.buffer,
-          retryRes.headers["content-type"],
+      const [shutubaRes, resultRes] = await Promise.allSettled([
+        fetchHttpBuffer(shutubaUrl, 8000),
+        fetchHttpBuffer(resultUrl, 8000),
+      ]);
+
+      if (shutubaRes.status === "fulfilled" && shutubaRes.value.ok) {
+        shutubaHtml = decodeHtmlBuffer(
+          shutubaRes.value.buffer,
+          shutubaRes.value.headers["content-type"],
         );
-        horses = extractHorsesWithDetails(retryHtml);
-        const retryTitle = extractTitle(retryHtml);
-        if (retryTitle) {
-          title = retryTitle;
+      }
+      if (resultRes.status === "fulfilled" && resultRes.value.ok) {
+        resultHtml = decodeHtmlBuffer(
+          resultRes.value.buffer,
+          resultRes.value.headers["content-type"],
+        );
+      }
+    } else {
+      const res = await fetchHttpBuffer(target, 8000);
+      if (res.ok) {
+        const html = decodeHtmlBuffer(
+          res.buffer,
+          res.headers["content-type"],
+        );
+        if (target.includes("shutuba")) {
+          shutubaHtml = html;
+        } else {
+          resultHtml = html;
         }
       }
-    } else if (isResultFetch && html) {
-      payouts = extractPayouts(html);
-      resultsList = extractResults(html);
     }
+
+    // Extract horses: Prioritize shutuba.html (complete entry list), fallback to resultHtml
+    const horsesFromShutuba = shutubaHtml
+      ? extractHorsesWithDetails(shutubaHtml)
+      : [];
+    const horsesFromResult = resultHtml
+      ? extractHorsesWithDetails(resultHtml)
+      : [];
+
+    const horses =
+      horsesFromShutuba.length >= horsesFromResult.length
+        ? horsesFromShutuba
+        : horsesFromResult;
+
+    const payouts = resultHtml ? extractPayouts(resultHtml) : {};
+    const resultsList = resultHtml ? extractResults(resultHtml) : [];
+
+    const titleHtml = shutubaHtml || resultHtml;
+    const title = extractTitle(titleHtml);
+    const hasResultsOrPayouts =
+      Object.keys(payouts).length > 0 || resultsList.length > 0;
 
     if (
       title &&
@@ -837,14 +854,16 @@ export async function GET(request: NextRequest) {
       if (horses.length > 0) {
         scrapedData = {
           success: true,
-          source: isResultFetch
+          source: hasResultsOrPayouts
             ? isNar
               ? "scraped-nar-result"
               : "scraped-netkeiba-result"
             : isNar
               ? "scraped-nar-entries"
               : "scraped-netkeiba-entries",
-          url: `${domain}/race/${isResultFetch ? "result" : "shutuba"}.html?race_id=${raceId || ""}`,
+          url: raceId
+            ? `${domain}/race/${hasResultsOrPayouts ? "result" : "shutuba"}.html?race_id=${raceId}`
+            : target,
           date: dateVal,
           track,
           raceNumber,
