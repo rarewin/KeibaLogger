@@ -21,6 +21,8 @@ model Memo {
   taiko      String
   anago      String
   renge      String
+  hoshi      String   @default("")
+  check      String   @default("")
   memoText   String
   result     String   // "hit" | "miss" | "pending"
   resultList String?  // Serialized JSON of top 5 finishing results
