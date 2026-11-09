@@ -90,6 +90,45 @@ function parseNumList(str: string): string[] {
     .filter(Boolean);
 }
 
+// Sanitizes racing ticket selection by filtering out horse/bracket numbers that exceed limits
+function sanitizeTicketSelection(
+  type: string,
+  selection: string,
+  maxNumber: number,
+): string {
+  const clean = (selection || "").trim();
+  if (!clean || maxNumber <= 0) return clean;
+
+  const isWaku = normalizeTicketType(type) === "枠連";
+  const limit = isWaku ? 8 : maxNumber;
+
+  const filterAndFormatNums = (str: string) => {
+    const nums = parseNumList(str)
+      .map(Number)
+      .filter((n) => !isNaN(n) && n >= 1 && n <= limit);
+    return Array.from(new Set(nums))
+      .sort((a, b) => a - b)
+      .join(",");
+  };
+
+  const upper = clean.toUpperCase();
+  if (upper.includes("BOX") || upper.includes("ボックス")) {
+    const rawNums = clean.replace(/BOX|ボックス/gi, "");
+    const filtered = filterAndFormatNums(rawNums);
+    return filtered ? `BOX ${filtered}` : "";
+  }
+
+  const normalizedClean = clean.replace(/[ー―−－–—〜~=➔→⇒★]+/g, "-");
+  const sections = normalizedClean.split("-");
+  if (sections.length > 1) {
+    const filteredSections = sections.map((s) => filterAndFormatNums(s));
+    if (filteredSections.every((s) => !s)) return "";
+    return filteredSections.join(" - ");
+  }
+
+  return filterAndFormatNums(clean);
+}
+
 // Expands racing notations (BOX, Nagashi, Formations) into discrete tickets (e.g. "3-6", "3-4")
 function expandTicketSelection(
   type: string,
@@ -714,6 +753,22 @@ export default function Home() {
   const [guiSelection2, setGuiSelection2] = useState<number[]>([]);
   const [guiSelection3, setGuiSelection3] = useState<number[]>([]);
 
+  const resetTicketGuiState = () => {
+    setActiveTicketGuiIndex(null);
+    setGuiBetType("normal");
+    setGuiSelection1([]);
+    setGuiSelection2([]);
+    setGuiSelection3([]);
+  };
+
+  const createDefaultTicket = (): Omit<TicketData, "id"> => ({
+    type: "単勝",
+    selection: "",
+    investment: 100,
+    payout: 0,
+    isHit: false,
+  });
+
   // Get calendar grid days (including padding from prev/next month)
   const getCalendarDays = (year: number, month: number) => {
     const firstDay = new Date(year, month, 1);
@@ -791,7 +846,7 @@ export default function Home() {
 
   // Multiple Tickets Form State (Default unit investment is now 100 Yen)
   const [tickets, setTickets] = useState<Omit<TicketData, "id">[]>([
-    { type: "単勝", selection: "", investment: 100, payout: 0, isHit: false },
+    createDefaultTicket(),
   ]);
   const [syncingMemoId, setSyncingMemoId] = useState<string | null>(null);
 
@@ -1287,7 +1342,7 @@ export default function Home() {
   const handleRemoveTicket = (index: number) => {
     setTickets(tickets.filter((_, i) => i !== index));
     if (activeTicketGuiIndex === index) {
-      setActiveTicketGuiIndex(null);
+      resetTicketGuiState();
     } else if (activeTicketGuiIndex !== null && activeTicketGuiIndex > index) {
       setActiveTicketGuiIndex(activeTicketGuiIndex - 1);
     }
@@ -1376,6 +1431,10 @@ export default function Home() {
     setCheck("");
     setOpenMarkDropdownUmaban(null);
 
+    // Reset tickets and GUI markcard selection for the new race
+    setTickets([createDefaultTicket()]);
+    resetTicketGuiState();
+
     // Sort fetched horses by Umaban
     const sortedHorses = (data.horses || []).sort(
       (a: ScrapedHorse, b: ScrapedHorse) => a.umaban - b.umaban,
@@ -1385,7 +1444,6 @@ export default function Home() {
     // Load payouts and finishing order
     if (data.payouts && Object.keys(data.payouts).length > 0) {
       setScrapedPayouts(data.payouts);
-      setTickets((prev) => calculateTicketsPayout(prev, data.payouts!));
     } else {
       setScrapedPayouts({});
     }
@@ -1714,7 +1772,11 @@ export default function Home() {
   };
 
   // Helper: Reverse-parse a wagers ticket selection string to populate the GUI button highlights
-  const parseSelectionToGui = (ticketType: string, selection: string) => {
+  const parseSelectionToGui = (
+    ticketType: string,
+    selection: string,
+    ticketIndex?: number,
+  ) => {
     const clean = (selection || "").trim().toUpperCase();
 
     let betType: "normal" | "nagashi" | "box" = "normal";
@@ -1722,10 +1784,17 @@ export default function Home() {
     let sel2: number[] = [];
     let sel3: number[] = [];
 
+    const isWakuRen = normalizeTicketType(ticketType) === "枠連";
+    const maxHorseNumber = isWakuRen
+      ? 8
+      : fetchedHorses.length > 0
+        ? Math.max(...fetchedHorses.map((h) => h.umaban), fetchedHorses.length)
+        : 18;
+
     const parseNumbers = (str: string) => {
       return parseNumList(str)
         .map(Number)
-        .filter((n) => !isNaN(n) && n > 0);
+        .filter((n) => !isNaN(n) && n > 0 && n <= maxHorseNumber);
     };
 
     if (clean.includes("BOX") || clean.includes("ボックス")) {
@@ -1752,10 +1821,23 @@ export default function Home() {
     setGuiSelection1(sel1);
     setGuiSelection2(sel2);
     setGuiSelection3(sel3);
+
+    // If ticketIndex is provided, sanitize selection so that out-of-range numbers are removed
+    if (ticketIndex !== undefined) {
+      const sanitized = sanitizeTicketSelection(
+        ticketType,
+        selection,
+        maxHorseNumber,
+      );
+      if (sanitized !== selection) {
+        handleTicketChange(ticketIndex, "selection", sanitized);
+      }
+    }
   };
 
   // Load saved memo into form for editing
   const handleEdit = (memo: MemoData, autoAddTicket = false) => {
+    resetTicketGuiState();
     setPreEditViewMode(viewMode);
     setViewMode("list");
     setEditingId(memo.id || null);
@@ -1932,9 +2014,8 @@ export default function Home() {
     setCheck("");
     setOpenMarkDropdownUmaban(null);
     setMemoText("");
-    setTickets([
-      { type: "単勝", selection: "", investment: 100, payout: 0, isHit: false },
-    ]);
+    setTickets([createDefaultTicket()]);
+    resetTicketGuiState();
     setFetchedHorses([]);
     setScrapedPayouts({});
     setScrapedResults([]);
@@ -2036,31 +2117,7 @@ export default function Home() {
       showToast(editingId ? "ログを更新しました" : "ログを保存しました");
 
       // Reset form fields
-      setEditingId(null);
-      editingIdRef.current = null;
-      setDate("");
-      setRaceName("");
-      setHonmei("");
-      setTaiko("");
-      setAnago("");
-      setRenge("");
-      setHoshi("");
-      setCheck("");
-      setOpenMarkDropdownUmaban(null);
-      setMemoText("");
-      setTickets([
-        {
-          type: "単勝",
-          selection: "",
-          investment: 100,
-          payout: 0,
-          isHit: false,
-        },
-      ]);
-      setFetchedHorses([]);
-      setScrapedPayouts({});
-      setScrapedResults([]);
-      setNetkeibaUrl("");
+      resetFormFields();
 
       if (preEditViewMode) {
         setViewMode(preEditViewMode);
@@ -3685,7 +3742,7 @@ export default function Home() {
                       }}
                       onClick={() => {
                         setTickets([]);
-                        setActiveTicketGuiIndex(null);
+                        resetTicketGuiState();
                       }}
                     >
                       馬券をクリア (予想のみ保存)
@@ -3827,12 +3884,13 @@ export default function Home() {
                               type="button"
                               onClick={() => {
                                 if (activeTicketGuiIndex === index) {
-                                  setActiveTicketGuiIndex(null);
+                                  resetTicketGuiState();
                                 } else {
                                   setActiveTicketGuiIndex(index);
                                   parseSelectionToGui(
                                     ticket.type,
                                     ticket.selection,
+                                    index,
                                   );
                                 }
                               }}
@@ -4010,11 +4068,14 @@ export default function Home() {
                               }
                             }
 
-                            const isWakuRen = ticket.type === "枠連";
+                            const isWakuRen = normalizeTicketType(ticket.type) === "枠連";
                             const totalHorses = isWakuRen
                               ? 8
                               : fetchedHorses.length > 0
-                                ? fetchedHorses.length
+                                ? Math.max(
+                                    ...fetchedHorses.map((h) => h.umaban),
+                                    fetchedHorses.length,
+                                  )
                                 : 18;
                             const horseList = Array.from(
                               { length: totalHorses },
