@@ -11,4 +11,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
 # Server Management Rules
 - Next.jsなどのサーバープロセスの起動・停止・再起動（kill含む）は、AI側で直接実行せず、必ずユーザーに作業を依頼すること。
 
+# Git Worktree Workspace Rules
+
+- Git worktree 環境で作業を開始する場合、検証・ビルド前に以下のセットアップを行うこと：
+  1. メインリポジトリのパスを動的に特定:
+     ```bash
+     MAIN_REPO="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+     ```
+  2. `node_modules` の共有: メインリポジトリからシンボリックリンクを作成する (`ln -s "$MAIN_REPO/node_modules" ./node_modules`、または `npm install`)
+  3. 環境変数設定: メインリポジトリからコピーする (`cp "$MAIN_REPO/.env" .env`)
+  4. DBの準備（必要な場合）: `npm run db:push` を実行するか、メインの `dev.db` をコピーして使用する (`cp "$MAIN_REPO/dev.db" ./dev.db`)
+
+
 
