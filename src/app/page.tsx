@@ -568,6 +568,14 @@ const LOG_SORT_OPTIONS: readonly { key: LogSortKey; label: string }[] = [
   { key: "recovery", label: "📈 回収率" },
 ];
 
+function getTodayDateString(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function getWeekRange(d: Date): {
   startStr: string;
   endStr: string;
@@ -828,7 +836,8 @@ export default function Home() {
   const [scrapedResults, setScrapedResults] = useState<RaceResult[]>([]);
 
   // Form states
-  const [date, setDate] = useState("");
+  const [date, setDate] = useState(getTodayDateString);
+  const lastRegisteredDateRef = useRef<string>(getTodayDateString());
   const [track, setTrack] = useState("東京");
   const [raceNumber, setRaceNumber] = useState("11");
   const [raceName, setRaceName] = useState("");
@@ -2001,10 +2010,10 @@ export default function Home() {
   };
 
   // Reset form fields
-  const resetFormFields = () => {
+  const resetFormFields = (targetDate?: string) => {
     setEditingId(null);
     editingIdRef.current = null;
-    setDate("");
+    setDate(targetDate ?? lastRegisteredDateRef.current);
     setRaceName("");
     setHonmei("");
     setTaiko("");
@@ -2080,7 +2089,7 @@ export default function Home() {
 
     const memoPayload: Omit<MemoData, "id"> & { id?: string } = {
       ...(editingId ? { id: editingId } : {}),
-      date: date || new Date().toISOString().split("T")[0],
+      date: date || getTodayDateString(),
       track,
       raceNumber,
       raceName,
@@ -2102,6 +2111,7 @@ export default function Home() {
     const res = await saveMemo(memoPayload);
     if (res.success) {
       const savedDate = memoPayload.date;
+      lastRegisteredDateRef.current = savedDate;
       const targetViewMode = preEditViewMode || viewMode;
       if (targetViewMode === "calendar") {
         setSelectedDateStr(savedDate);
@@ -2116,8 +2126,8 @@ export default function Home() {
       await refreshMemos();
       showToast(editingId ? "ログを更新しました" : "ログを保存しました");
 
-      // Reset form fields
-      resetFormFields();
+      // Reset form fields but keep the last registered date
+      resetFormFields(savedDate);
 
       if (preEditViewMode) {
         setViewMode(preEditViewMode);
@@ -3193,6 +3203,7 @@ export default function Home() {
                     className="input-control"
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
+                    suppressHydrationWarning
                   />
                 </div>
                 <div className={styles.formGroup}>
@@ -4857,7 +4868,7 @@ export default function Home() {
                         selectedDateStr !== null &&
                         normalizeDate(selectedDateStr) === day.dateStr;
                       const isToday =
-                        day.dateStr === new Date().toISOString().split("T")[0];
+                        day.dateStr === getTodayDateString();
 
                       return (
                         <div
