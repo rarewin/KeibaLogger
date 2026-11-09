@@ -3,6 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "../lib/prisma";
 
+function safeRevalidatePath(path = "/") {
+  try {
+    revalidatePath(path);
+  } catch {
+    // revalidatePath throws when called outside Next.js request context (e.g. CLI scripts or tests)
+  }
+}
+
 export interface TicketData {
   id?: string;
   type: string;
@@ -215,7 +223,7 @@ export async function saveMemo(data: Omit<MemoData, "id"> & { id?: string }) {
         memo.id,
       );
 
-      revalidatePath("/");
+      safeRevalidatePath("/");
       return { success: true, id: memo.id };
     }
 
@@ -242,7 +250,7 @@ export async function saveMemo(data: Omit<MemoData, "id"> & { id?: string }) {
       memo.id,
     );
 
-    revalidatePath("/");
+    safeRevalidatePath("/");
     return { success: true, id: memo.id };
   } catch (error) {
     console.error("Error saving memo:", error);
@@ -256,7 +264,7 @@ export async function deleteMemo(id: string) {
     await prisma.memo.delete({
       where: { id },
     });
-    revalidatePath("/");
+    safeRevalidatePath("/");
     return { success: true };
   } catch (error) {
     console.error("Error deleting memo:", error);
@@ -598,7 +606,7 @@ export async function importMemos(
       }
     });
 
-    revalidatePath("/");
+    safeRevalidatePath("/");
     return {
       success: true,
       count: normalizedMemos.length,
