@@ -18,9 +18,19 @@ This version has breaking changes — APIs, conventions, and file structure may 
      ```bash
      MAIN_REPO="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
      ```
-  2. `node_modules` の共有: メインリポジトリからシンボリックリンクを作成する (`ln -s "$MAIN_REPO/node_modules" ./node_modules`、または `npm install`)
+  2. 依存関係のセットアップ:
+     ※ Turbopack はプロジェクト外への `node_modules` シンボリックリンクを拒否するため、独立した `node_modules` を用意し、ネイティブバイナリをメインリポジトリから引き継ぐこと。
+     ```bash
+     npm install
+     mkdir -p node_modules/better-sqlite3/build/Release
+     cp "$MAIN_REPO/node_modules/better-sqlite3/build/Release/better_sqlite3.node" node_modules/better-sqlite3/build/Release/
+     ```
   3. 環境変数設定: メインリポジトリからコピーする (`cp "$MAIN_REPO/.env" .env`)
-  4. DBの準備（必要な場合）: `npm run db:push` を実行するか、メインの `dev.db` をコピーして使用する (`cp "$MAIN_REPO/dev.db" ./dev.db`)
+  4. Prisma Client の生成:
+     ```bash
+     npm run db:generate
+     ```
+  5. DBの準備（必要な場合）: `npm run db:push` を実行するか、メインの `dev.db` をコピーして使用する (`cp "$MAIN_REPO/dev.db" ./dev.db`)
 
 
 
