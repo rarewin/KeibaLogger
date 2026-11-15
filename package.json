@@ -34,5 +34,12 @@
     "eslint-config-next": "16.2.10",
     "prisma": "^7.8.0",
     "typescript": "^5"
+  },
+  "allowScripts": {
+    "better-sqlite3": true,
+    "@prisma/engines": true,
+    "prisma": true,
+    "sharp": true,
+    "unrs-resolver": true
   }
 }
