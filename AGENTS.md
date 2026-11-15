@@ -22,8 +22,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
      ※ Turbopack はプロジェクト外への `node_modules` シンボリックリンクを拒否するため、独立した `node_modules` を用意し、ネイティブバイナリをメインリポジトリから引き継ぐこと。
      ```bash
      npm install
-     mkdir -p node_modules/better-sqlite3/build/Release
-     cp "$MAIN_REPO/node_modules/better-sqlite3/build/Release/better_sqlite3.node" node_modules/better-sqlite3/build/Release/
+     if [ -f "$MAIN_REPO/node_modules/better-sqlite3/build/Release/better_sqlite3.node" ]; then
+       mkdir -p node_modules/better-sqlite3/build/Release
+       cp "$MAIN_REPO/node_modules/better-sqlite3/build/Release/better_sqlite3.node" node_modules/better-sqlite3/build/Release/
+     else
+       npm rebuild better-sqlite3
+     fi
      ```
   3. 環境変数設定: メインリポジトリからコピーする (`cp "$MAIN_REPO/.env" .env`)
   4. Prisma Client の生成:
